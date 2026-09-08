@@ -6,6 +6,7 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const errorHandler = require('./middlewares/errorHandler');
 const { startKeepAlive } = require('./helpers/keepAlive');
+const { startAuditArchiving } = require('./helpers/archiveAudit');
 
 const authRoutes = require('./src/auth/auth_routes');
 const userRoutes = require('./src/users/user_routes');
@@ -42,6 +43,7 @@ async function start() {
   app.listen(port, () => {
     console.log(`Servidor escuchando en el puerto ${port}`);
     startKeepAlive();
+    startAuditArchiving();
   });
 }
 

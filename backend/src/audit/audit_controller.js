@@ -1,11 +1,13 @@
 const Audit = require('./audit_model');
+const AuditArchive = require('./auditArchive_model');
 const { ROLES } = require('../../utils/constants');
 const { usuariosVisiblesPara } = require('../../helpers/alcanceEquipo');
 const { ok } = require('../../utils/httpResponse');
 
 async function listAudit(req, res, next) {
   try {
-    const { usuario, accion, entidad, desde, hasta, page = 1, limit = 20 } = req.query;
+    const { usuario, accion, entidad, desde, hasta, origen, page = 1, limit = 20 } = req.query;
+    const Modelo = origen === 'archivo' ? AuditArchive : Audit;
 
     const filtro = {};
     if (accion) filtro.accion = accion;
@@ -36,12 +38,12 @@ async function listAudit(req, res, next) {
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
 
     const [registros, total] = await Promise.all([
-      Audit.find(filtro)
+      Modelo.find(filtro)
         .populate('usuario', 'nombre email rol')
         .sort({ fecha: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
-      Audit.countDocuments(filtro),
+      Modelo.countDocuments(filtro),
     ]);
 
     return ok(res, {

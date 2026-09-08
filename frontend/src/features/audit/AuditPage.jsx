@@ -4,9 +4,15 @@ import { getErrorMessage } from '../../shared/api/axiosClient';
 import { ACCIONES_AUDITORIA, ACCION_LABELS, ACCION_TONOS, ROL_LABELS } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
+import Tabs from '../../shared/components/Tabs';
 import Pagination from '../../shared/components/Pagination';
 import AlertBanner from '../../shared/components/AlertBanner';
 import { Select } from '../../shared/components/FormField';
+
+const TABS = [
+  { value: 'reciente', label: 'Recientes (ultimos 30 dias)' },
+  { value: 'archivo', label: 'Archivo' },
+];
 
 function formatearFecha(fecha) {
   return new Date(fecha).toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' });
@@ -20,6 +26,7 @@ function resumenDetalles(detalles) {
 }
 
 export default function AuditPage() {
+  const [activeTab, setActiveTab] = useState('reciente');
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
@@ -36,6 +43,7 @@ export default function AuditPage() {
       const params = { page, limit: 15 };
       if (accion) params.accion = accion;
       if (usuario) params.usuario = usuario;
+      if (activeTab === 'archivo') params.origen = 'archivo';
       const res = await auditApi.list(params);
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
@@ -56,7 +64,7 @@ export default function AuditPage() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, accion, usuario]);
+  }, [page, accion, usuario, activeTab]);
 
   const columns = [
     { key: 'fecha', header: 'Fecha', render: (row) => formatearFecha(row.fecha) },
@@ -73,6 +81,21 @@ export default function AuditPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Auditoria</h1>
+
+      <Tabs
+        tabs={TABS}
+        active={activeTab}
+        onChange={(value) => {
+          setActiveTab(value);
+          setPage(1);
+        }}
+      />
+      {activeTab === 'archivo' ? (
+        <p className="text-sm text-slate-500">
+          Registros de mas de 30 dias. Se mueven aqui automaticamente para no sobrecargar la vista de Recientes, pero
+          siguen completos y consultables.
+        </p>
+      ) : null}
 
       <div className="flex gap-3">
         <Select
