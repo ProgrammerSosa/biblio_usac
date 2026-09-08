@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BookOpen, CheckSquare, ShieldCheck, Users, LogOut, Landmark, Tags } from 'lucide-react';
+import { BookOpen, CheckSquare, ShieldCheck, Users, LogOut, Landmark, Tags, Activity } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { ROL_LABELS } from '../constants';
 import { CategoriesProvider } from '../CategoriesContext';
@@ -7,6 +7,7 @@ import { CategoriesProvider } from '../CategoriesContext';
 const NAV_ITEMS = [
   { to: '/catalogo', label: 'Catalogo', icon: BookOpen, roles: ['MANAGER', 'ADMIN', 'USER'] },
   { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare, roles: ['MANAGER', 'ADMIN'] },
+  { to: '/equipo', label: 'Equipo', icon: Activity, roles: ['MANAGER', 'ADMIN'] },
   { to: '/auditoria', label: 'Auditoria', icon: ShieldCheck, roles: ['MANAGER', 'ADMIN'] },
   { to: '/categorias', label: 'Categorias', icon: Tags, roles: ['MANAGER'] },
   { to: '/personal', label: 'Personal', icon: Users, roles: ['MANAGER'] },

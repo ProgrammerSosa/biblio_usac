@@ -9,6 +9,8 @@ import ApprovalsPage from '../features/approvals/ApprovalsPage';
 import AuditPage from '../features/audit/AuditPage';
 import PersonnelPage from '../features/users/PersonnelPage';
 import CategoriesPage from '../features/categories/CategoriesPage';
+import TeamPage from '../features/team/TeamPage';
+import ProfilePage from '../features/team/ProfilePage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <RootRedirect /> },
@@ -28,6 +30,8 @@ export const router = createBrowserRouter([
             children: [
               { path: '/aprobaciones', element: <ApprovalsPage /> },
               { path: '/auditoria', element: <AuditPage /> },
+              { path: '/equipo', element: <TeamPage /> },
+              { path: '/equipo/:id', element: <ProfilePage /> },
             ],
           },
           {

@@ -3,6 +3,7 @@ const Invitation = require('./invitation_model');
 const { hashPassword, comparePassword } = require('../../helpers/password');
 const { generateJWT } = require('../../helpers/tokens');
 const { ESTADOS_INVITACION } = require('../../utils/constants');
+const { escapeRegExp } = require('../../helpers/regex');
 const { ok, created, fail, unauthorized, notFound, forbidden } = require('../../utils/httpResponse');
 
 function toPublicUser(user) {
@@ -13,10 +14,6 @@ function toPublicUser(user) {
     rol: user.rol,
     allowedCategories: user.allowedCategories,
   };
-}
-
-function escapeRegExp(texto) {
-  return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function login(req, res, next) {

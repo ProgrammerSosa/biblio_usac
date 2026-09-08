@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Pencil, Trash2, AlertTriangle, FileDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search } from 'lucide-react';
 import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -24,6 +24,8 @@ export default function CatalogListPage() {
   const [page, setPage] = useState(1);
   const [categoria, setCategoria] = useState('');
   const [estadoRevision, setEstadoRevision] = useState('');
+  const [buscarInput, setBuscarInput] = useState('');
+  const [buscar, setBuscar] = useState('');
   const [soloMios, setSoloMios] = useState(user?.rol === ROLES.USER);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -39,6 +41,7 @@ export default function CatalogListPage() {
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
       if (soloMios) params.registradoPor = user?.id;
+      if (buscar.trim()) params.buscar = buscar.trim();
       const res = await catalogApi.list(params);
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
@@ -50,9 +53,17 @@ export default function CatalogListPage() {
   }
 
   useEffect(() => {
+    const temporizador = setTimeout(() => {
+      setPage(1);
+      setBuscar(buscarInput);
+    }, 350);
+    return () => clearTimeout(temporizador);
+  }, [buscarInput]);
+
+  useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoria, estadoRevision, soloMios]);
+  }, [page, categoria, estadoRevision, soloMios, buscar]);
 
   async function confirmarEliminar() {
     if (!itemAEliminar) return;
@@ -154,6 +165,17 @@ export default function CatalogListPage() {
             <Button icon={Plus}>Registrar material</Button>
           </Link>
         </div>
+      </div>
+
+      <div className="relative max-w-md">
+        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={buscarInput}
+          onChange={(e) => setBuscarInput(e.target.value)}
+          placeholder="Buscar por titulo, autor o no. de inventario..."
+          className="w-full rounded-md border border-border bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+        />
       </div>
 
       <div className="flex gap-3">

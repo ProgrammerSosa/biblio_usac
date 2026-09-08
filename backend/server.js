@@ -9,6 +9,7 @@ const { startKeepAlive } = require('./helpers/keepAlive');
 
 const authRoutes = require('./src/auth/auth_routes');
 const userRoutes = require('./src/users/user_routes');
+const teamRoutes = require('./src/users/team_routes');
 const catalogRoutes = require('./src/catalog/catalog_routes');
 const categoryRoutes = require('./src/catalog/category_routes');
 const auditRoutes = require('./src/audit/audit_routes');
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => res.json({ success: true, data: 'ok' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/team', teamRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit', auditRoutes);

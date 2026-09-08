@@ -1,12 +1,7 @@
 const Audit = require('./audit_model');
-const User = require('../users/user_model');
 const { ROLES } = require('../../utils/constants');
+const { usuariosVisiblesPara } = require('../../helpers/alcanceEquipo');
 const { ok } = require('../../utils/httpResponse');
-
-async function idsVisiblesParaAdmin() {
-  const auxiliares = await User.find({ rol: ROLES.USER }).select('_id');
-  return auxiliares.map((u) => u._id.toString());
-}
 
 async function listAudit(req, res, next) {
   try {
@@ -23,7 +18,8 @@ async function listAudit(req, res, next) {
 
     if (req.user.rol === ROLES.ADMIN) {
       // Un Admin solo puede auditar a los Auxiliares, no a otros Admin ni a la Manager.
-      const idsPermitidos = await idsVisiblesParaAdmin();
+      const visibles = await usuariosVisiblesPara(req.user.rol);
+      const idsPermitidos = visibles.map((u) => u._id.toString());
       if (usuario) {
         if (!idsPermitidos.includes(usuario)) {
           return ok(res, { registros: [], total: 0, page: 1, totalPages: 0 });
@@ -61,9 +57,8 @@ async function listAudit(req, res, next) {
 
 async function listUsuariosFiltrables(req, res, next) {
   try {
-    const filtroRol = req.user.rol === ROLES.ADMIN ? { rol: ROLES.USER } : { rol: { $in: [ROLES.ADMIN, ROLES.USER, ROLES.MANAGER] } };
-
-    const usuarios = await User.find(filtroRol).select('nombre email rol').sort({ nombre: 1 });
+    const usuarios = await usuariosVisiblesPara(req.user.rol);
+    usuarios.sort((a, b) => a.nombre.localeCompare(b.nombre));
     return ok(res, usuarios);
   } catch (err) {
     return next(err);

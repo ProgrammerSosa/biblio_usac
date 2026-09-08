@@ -2,6 +2,7 @@ const Catalog = require('./catalog_model');
 const User = require('../users/user_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
+const { escapeRegExp } = require('../../helpers/regex');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
 const CAMPOS_EDITABLES = [
@@ -65,12 +66,16 @@ async function createItem(req, res, next) {
 
 async function listItems(req, res, next) {
   try {
-    const { estadoRevision, categoria, registradoPor, page = 1, limit = 20 } = req.query;
+    const { estadoRevision, categoria, registradoPor, buscar, page = 1, limit = 20 } = req.query;
 
     const filtro = { eliminado: false };
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
     if (categoria) filtro.categoria = categoria;
     if (registradoPor) filtro.registradoPor = registradoPor;
+    if (buscar && buscar.trim()) {
+      const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
+      filtro.$or = [{ titulo: patron }, { autor: patron }, { noInventario: patron }];
+    }
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
