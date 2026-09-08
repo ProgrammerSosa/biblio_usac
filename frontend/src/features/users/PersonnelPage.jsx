@@ -138,7 +138,7 @@ export default function PersonnelPage() {
     {
       key: 'allowedCategories',
       header: 'Categorias asignadas',
-      render: (row) => (row.allowedCategories?.length ? row.allowedCategories.map((c) => etiquetaDe(c)).join(', ') : '-'),
+      render: (row) => (row.allowedCategories?.length ? row.allowedCategories.map((c) => etiquetaDe(c)).join(', ') : 'N/A'),
     },
     {
       key: 'activo',

@@ -2,16 +2,15 @@ import { ESTADOS_REVISION } from '../../shared/constants';
 import { useCategories } from '../../shared/hooks/useCategories';
 
 function DetalleCampo({ label, valor, destacado }) {
-  if (!valor) return null;
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={destacado ? 'text-sm text-secondary' : 'text-sm text-slate-700'}>{valor}</p>
+      <p className={destacado ? 'text-sm text-secondary' : 'text-sm text-slate-700'}>{valor || 'N/A'}</p>
     </div>
   );
 }
 
-export default function CatalogDetailFields({ item }) {
+export default function CatalogDetailFields({ item, ocultarRevision = false }) {
   const { camposDe } = useCategories();
   const camposCategoria = camposDe(item.categoria);
 
@@ -24,11 +23,15 @@ export default function CatalogDetailFields({ item }) {
       {camposCategoria.map((campo) => (
         <DetalleCampo key={campo.clave} label={campo.etiqueta} valor={item.atributos?.[campo.clave]} />
       ))}
-      <DetalleCampo label="Revisado por Admin" valor={item.revisadoPorAdmin?.nombre} />
-      {item.estadoRevision === ESTADOS_REVISION.RECHAZADO ? (
-        <div className="col-span-full">
-          <DetalleCampo label="Motivo de rechazo" valor={item.observaciones} destacado />
-        </div>
+      {!ocultarRevision ? (
+        <>
+          <DetalleCampo label="Revisado por Admin" valor={item.revisadoPorAdmin?.nombre} />
+          {item.estadoRevision === ESTADOS_REVISION.RECHAZADO ? (
+            <div className="col-span-full">
+              <DetalleCampo label="Motivo de rechazo" valor={item.observaciones} destacado />
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

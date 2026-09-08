@@ -15,8 +15,16 @@ const ESTADO_LABELS = {
 const ANCHO_TOTAL_ATRIBUTOS = 260;
 
 const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT : null);
-const estadoFisicoTexto = (row) => row.estadoFisico || 'Sin observaciones';
+const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
 const estadoRevisionTexto = (row) => ESTADO_LABELS[row.estadoRevision] || row.estadoRevision;
+
+function nombreArchivoPdf() {
+  const ahora = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const fecha = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())}`;
+  const hora = `${pad(ahora.getHours())}-${pad(ahora.getMinutes())}-${pad(ahora.getSeconds())}`;
+  return `catalogo-biblioteca-${fecha}_${hora}.pdf`;
+}
 
 function construirColumnas(categoriaDoc) {
   const campos = categoriaDoc.campos || [];
@@ -26,7 +34,7 @@ function construirColumnas(categoriaDoc) {
     key: `atributos.${campo.clave}`,
     header: campo.etiqueta,
     width: anchoPorCampo,
-    render: (row) => (row.atributos && row.atributos[campo.clave]) || '-',
+    render: (row) => (row.atributos && row.atributos[campo.clave]) || 'N/A',
   }));
 
   return [
@@ -77,7 +85,7 @@ async function exportCatalogPdf(req, res, next) {
     const categorias = await Category.find({ clave: { $in: [...grupos.keys()] } }).sort({ nombre: 1 });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="catalogo-biblioteca.pdf"');
+    res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoPdf()}"`);
 
     const doc = new PDFDocument({ margin: 40, size: 'A4', layout: 'landscape' });
     doc.pipe(res);

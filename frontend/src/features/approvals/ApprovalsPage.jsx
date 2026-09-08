@@ -157,9 +157,9 @@ export default function ApprovalsPage() {
       key: 'estadoFisico',
       header: 'Estado fisico',
       render: (row) =>
-        tieneDanoFisico(row.estadoFisico) ? <Badge tone="danger">{row.estadoFisico}</Badge> : row.estadoFisico || '-',
+        tieneDanoFisico(row.estadoFisico) ? <Badge tone="danger">{row.estadoFisico}</Badge> : row.estadoFisico || 'N/A',
     },
-    { key: 'registradoPor', header: 'Registrado por', render: (row) => row.registradoPor?.nombre || '-' },
+    { key: 'registradoPor', header: 'Registrado por', render: (row) => row.registradoPor?.nombre || 'N/A' },
     ...(puedeActuar
       ? [
           {

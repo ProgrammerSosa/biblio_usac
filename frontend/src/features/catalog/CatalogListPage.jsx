@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers } from 'lucide-react';
 import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -15,6 +15,108 @@ import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
 import { Select } from '../../shared/components/FormField';
 import CatalogDetailFields from './CatalogDetailFields';
+
+const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'danger' };
+
+function claveDeGrupo(item) {
+  return [item.categoria, item.autor, item.titulo, item.edicion, item.idioma]
+    .map((v) => (v || '').trim().toLowerCase())
+    .join('|');
+}
+
+function agruparRegistros(registros) {
+  const grupos = new Map();
+  for (const item of registros) {
+    const clave = claveDeGrupo(item);
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(item);
+  }
+  return [...grupos.values()].map((copias) => ({ ...copias[0], copias }));
+}
+
+function nombreArchivoPdf() {
+  const ahora = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const fecha = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())}`;
+  const hora = `${pad(ahora.getHours())}-${pad(ahora.getMinutes())}-${pad(ahora.getSeconds())}`;
+  return `catalogo-biblioteca-${fecha}_${hora}.pdf`;
+}
+
+function ResumenEstadoRevision({ copias }) {
+  const cuenta = {};
+  copias.forEach((c) => {
+    cuenta[c.estadoRevision] = (cuenta[c.estadoRevision] || 0) + 1;
+  });
+  const distintos = Object.keys(cuenta);
+
+  if (distintos.length === 1) {
+    return <EstadoRevisionBadge estado={distintos[0]} />;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {distintos.map((estado) => (
+        <Badge key={estado} tone={TONO_ESTADO[estado] || 'neutral'}>
+          {cuenta[estado]} {ESTADO_REVISION_LABELS[estado]}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function ListaCopias({ copias, puedeEditar, esManager, onEliminar }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-3 py-2 font-semibold">No. Inventario</th>
+            <th className="px-3 py-2 font-semibold">Estado fisico</th>
+            <th className="px-3 py-2 font-semibold">Estado</th>
+            <th className="px-3 py-2 font-semibold">Registrado por</th>
+            <th className="px-3 py-2 font-semibold">Acciones</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border bg-white">
+          {copias.map((copia) => (
+            <tr key={copia._id}>
+              <td className="px-3 py-2 font-medium text-slate-700">{copia.noInventario}</td>
+              <td className="px-3 py-2">
+                {tieneDanoFisico(copia.estadoFisico) ? (
+                  <Badge tone="danger" icon={AlertTriangle}>
+                    {copia.estadoFisico}
+                  </Badge>
+                ) : (
+                  <span className="text-slate-500">{copia.estadoFisico || 'N/A'}</span>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                <EstadoRevisionBadge estado={copia.estadoRevision} />
+                {copia.estadoRevision === ESTADOS_REVISION.RECHAZADO && copia.observaciones ? (
+                  <p className="mt-1 text-xs text-secondary">{copia.observaciones}</p>
+                ) : null}
+              </td>
+              <td className="px-3 py-2">{copia.registradoPor?.nombre || 'N/A'}</td>
+              <td className="px-3 py-2">
+                <div className="flex gap-2">
+                  {puedeEditar(copia) ? (
+                    <Link to={`/catalogo/${copia._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
+                      <Pencil size={16} />
+                    </Link>
+                  ) : null}
+                  {esManager ? (
+                    <button onClick={() => onEliminar(copia)} className="text-secondary hover:text-red-700" title="Eliminar">
+                      <Trash2 size={16} />
+                    </button>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function CatalogListPage() {
   const { user } = useAuth();
@@ -90,7 +192,7 @@ export default function CatalogListPage() {
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'catalogo-biblioteca.pdf';
+      link.download = nombreArchivoPdf();
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -108,47 +210,89 @@ export default function CatalogListPage() {
     return esAutor && estadoEditable;
   }
 
+  const filas = agruparRegistros(registros);
+
   const columns = [
-    { key: 'noInventario', header: 'No. Inventario' },
+    {
+      key: 'noInventario',
+      header: 'No. Inventario',
+      render: (row) =>
+        row.copias.length > 1 ? (
+          <Badge tone="primary" icon={Layers}>
+            {row.copias.length} copias
+          </Badge>
+        ) : (
+          row.noInventario
+        ),
+    },
     { key: 'categoria', header: 'Categoria', render: (row) => etiquetaDe(row.categoria) },
     { key: 'titulo', header: 'Titulo' },
     { key: 'autor', header: 'Autor' },
     {
       key: 'estadoFisico',
       header: 'Estado fisico',
-      render: (row) =>
-        tieneDanoFisico(row.estadoFisico) ? (
-          <Badge tone="danger" icon={AlertTriangle}>
-            {row.estadoFisico}
-          </Badge>
-        ) : (
-          <span className="text-slate-500">{row.estadoFisico || '-'}</span>
-        ),
+      render: (row) => {
+        const conDano = row.copias.filter((c) => tieneDanoFisico(c.estadoFisico));
+        if (conDano.length > 0) {
+          return (
+            <Badge tone="danger" icon={AlertTriangle}>
+              {conDano.length} de {row.copias.length} con dano
+            </Badge>
+          );
+        }
+        return <span className="text-slate-500">{row.copias[0].estadoFisico || 'N/A'}</span>;
+      },
     },
-    { key: 'estadoRevision', header: 'Estado', render: (row) => <EstadoRevisionBadge estado={row.estadoRevision} /> },
-    { key: 'registradoPor', header: 'Registrado por', render: (row) => row.registradoPor?.nombre || '-' },
+    { key: 'estadoRevision', header: 'Estado', render: (row) => <ResumenEstadoRevision copias={row.copias} /> },
+    {
+      key: 'registradoPor',
+      header: 'Registrado por',
+      render: (row) => {
+        const nombres = new Set(row.copias.map((c) => c.registradoPor?.nombre || 'N/A'));
+        return nombres.size === 1 ? [...nombres][0] : 'Varios';
+      },
+    },
     {
       key: 'acciones',
       header: 'Acciones',
-      render: (row) => (
-        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-          {puedeEditar(row) ? (
-            <Link to={`/catalogo/${row._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
-              <Pencil size={16} />
-            </Link>
-          ) : null}
-          {user?.rol === ROLES.MANAGER ? (
-            <button onClick={() => setItemAEliminar(row)} className="text-secondary hover:text-red-700" title="Eliminar">
-              <Trash2 size={16} />
-            </button>
-          ) : null}
-        </div>
-      ),
+      render: (row) => {
+        if (row.copias.length > 1) {
+          return <span className="text-xs text-slate-400">Ver copias</span>;
+        }
+        const item = row.copias[0];
+        return (
+          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+            {puedeEditar(item) ? (
+              <Link to={`/catalogo/${item._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
+                <Pencil size={16} />
+              </Link>
+            ) : null}
+            {user?.rol === ROLES.MANAGER ? (
+              <button onClick={() => setItemAEliminar(item)} className="text-secondary hover:text-red-700" title="Eliminar">
+                <Trash2 size={16} />
+              </button>
+            ) : null}
+          </div>
+        );
+      },
     },
   ];
 
   function renderExpanded(row) {
-    return <CatalogDetailFields item={row} />;
+    if (row.copias.length === 1) {
+      return <CatalogDetailFields item={row.copias[0]} />;
+    }
+    return (
+      <div className="flex flex-col gap-4">
+        <CatalogDetailFields item={row.copias[0]} ocultarRevision />
+        <ListaCopias
+          copias={row.copias}
+          puedeEditar={puedeEditar}
+          esManager={user?.rol === ROLES.MANAGER}
+          onEliminar={setItemAEliminar}
+        />
+      </div>
+    );
   }
 
   return (
@@ -229,7 +373,7 @@ export default function CatalogListPage() {
 
       <DataTable
         columns={columns}
-        rows={registros}
+        rows={filas}
         rowKey="_id"
         loading={loading}
         emptyMessage="No hay materiales registrados"

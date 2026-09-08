@@ -41,12 +41,12 @@ function drawTable(doc, { x, columns, rows }) {
     doc.rect(x, y, width, ROW_HEIGHT).strokeColor(BORDER_COLOR).stroke();
 
     columns.forEach((col) => {
-      const valor = col.render ? col.render(row) : row[col.key] ?? '-';
+      const valor = col.render ? col.render(row) : row[col.key] ?? 'N/A';
       doc
         .fillColor(col.colorFn ? col.colorFn(row) || ROW_TEXT : ROW_TEXT)
         .font('Helvetica')
         .fontSize(8)
-        .text(String(valor ?? '-'), cursorX + 4, y + 6, { width: col.width - 8, height: ROW_HEIGHT - 6, ellipsis: true });
+        .text(String(valor ?? 'N/A'), cursorX + 4, y + 6, { width: col.width - 8, height: ROW_HEIGHT - 6, ellipsis: true });
       cursorX += col.width;
     });
 
