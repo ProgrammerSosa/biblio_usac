@@ -51,6 +51,28 @@ async function login(req, res, next) {
   }
 }
 
+async function checkInvitation(req, res, next) {
+  try {
+    const invitation = await Invitation.findOne({ token: req.params.token });
+
+    if (!invitation) {
+      return ok(res, { valido: false, motivo: 'Este enlace de invitacion no existe' });
+    }
+
+    if (invitation.estado === ESTADOS_INVITACION.ACEPTADA) {
+      return ok(res, { valido: false, motivo: 'Esta invitacion ya fue utilizada para crear una cuenta' });
+    }
+
+    if (invitation.estado === ESTADOS_INVITACION.EXPIRADA || invitation.expiresAt < new Date()) {
+      return ok(res, { valido: false, motivo: 'Esta invitacion ya expiro, pide una nueva' });
+    }
+
+    return ok(res, { valido: true, email: invitation.email, rol: invitation.rol });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function registerFromInvitation(req, res, next) {
   try {
     const { token, nombre, password } = req.body;
@@ -93,4 +115,4 @@ async function registerFromInvitation(req, res, next) {
   }
 }
 
-module.exports = { login, registerFromInvitation, toPublicUser };
+module.exports = { login, checkInvitation, registerFromInvitation, toPublicUser };

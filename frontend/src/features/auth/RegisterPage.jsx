@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { UserPlus } from 'lucide-react';
+import { UserPlus, Loader2 } from 'lucide-react';
 import axiosClient, { getErrorMessage } from '../../shared/api/axiosClient';
 import Button from '../../shared/components/Button';
 import { Input } from '../../shared/components/FormField';
@@ -26,7 +26,16 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [exito, setExito] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [estadoInvitacion, setEstadoInvitacion] = useState(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!token) return;
+    axiosClient
+      .get(`/auth/invitations/${token}`)
+      .then((res) => setEstadoInvitacion(res.data.data))
+      .catch(() => setEstadoInvitacion({ valido: false, motivo: 'No se pudo validar este enlace de invitacion' }));
+  }, [token]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -64,6 +73,28 @@ export default function RegisterPage() {
       <CenteredCard title="Cuenta creada">
         <p className="mb-4 text-sm text-slate-600">Tu cuenta se creo correctamente. Ya puedes iniciar sesion.</p>
         <Button onClick={() => navigate('/login', { replace: true })}>Ir a iniciar sesion</Button>
+      </CenteredCard>
+    );
+  }
+
+  if (!estadoInvitacion) {
+    return (
+      <CenteredCard>
+        <div className="flex items-center justify-center gap-2 py-4 text-slate-400">
+          <Loader2 className="animate-spin" size={18} />
+          Validando invitacion...
+        </div>
+      </CenteredCard>
+    );
+  }
+
+  if (!estadoInvitacion.valido) {
+    return (
+      <CenteredCard title="Enlace no disponible">
+        <AlertBanner>{estadoInvitacion.motivo}</AlertBanner>
+        <Link to="/login" className="mt-4 inline-block text-sm text-primary hover:underline">
+          Volver a iniciar sesion
+        </Link>
       </CenteredCard>
     );
   }

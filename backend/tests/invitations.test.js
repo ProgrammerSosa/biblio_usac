@@ -5,6 +5,7 @@ const { seedCategoriasDePrueba } = require('./helpers/seedCategorias');
 const { api } = require('./helpers/apiClient');
 const app = require('../server');
 const User = require('../src/users/user_model');
+const Invitation = require('../src/auth/invitation_model');
 const Audit = require('../src/audit/audit_model');
 const { hashPassword } = require('../helpers/password');
 const { generateJWT } = require('../helpers/tokens');
@@ -120,5 +121,61 @@ describe('Alta de usuarios por invitacion (Manager)', () => {
       .send({ token, nombre: 'Otra Persona', password: 'otraClave123' });
 
     expect(segundoIntento.status).toBe(409);
+  });
+});
+
+describe('GET /api/auth/invitations/:token (validar antes de mostrar el formulario)', () => {
+  test('una invitacion pendiente y vigente es valida', async () => {
+    const invitacion = await api(app)
+      .post('/api/users/invitations')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ email: 'valida@usac.gt', rol: ROLES.USER, allowedCategories: ['LIBRO'] });
+
+    const { token } = invitacion.body.data.invitation;
+
+    const res = await api(app).get(`/api/auth/invitations/${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.valido).toBe(true);
+    expect(res.body.data.email).toBe('valida@usac.gt');
+  });
+
+  test('una invitacion ya aceptada deja de ser valida (no muestra el formulario de nuevo)', async () => {
+    const invitacion = await api(app)
+      .post('/api/users/invitations')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ email: 'yausada@usac.gt', rol: ROLES.USER, allowedCategories: ['LIBRO'] });
+
+    const { token } = invitacion.body.data.invitation;
+
+    await api(app).post('/api/auth/register-invitation').send({ token, nombre: 'Ya Usada', password: 'claveSegura123' });
+
+    const res = await api(app).get(`/api/auth/invitations/${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.valido).toBe(false);
+    expect(res.body.data.motivo).toMatch(/ya fue utilizada/i);
+  });
+
+  test('una invitacion expirada no es valida', async () => {
+    const invitacion = await Invitation.create({
+      email: 'expirada@usac.gt',
+      rol: ROLES.USER,
+      token: 'token-de-prueba-expirado',
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    const res = await api(app).get(`/api/auth/invitations/${invitacion.token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.valido).toBe(false);
+    expect(res.body.data.motivo).toMatch(/expiro/i);
+  });
+
+  test('un token que no existe no es valido', async () => {
+    const res = await api(app).get('/api/auth/invitations/token-inventado-que-no-existe');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.valido).toBe(false);
   });
 });
