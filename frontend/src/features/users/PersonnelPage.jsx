@@ -96,6 +96,10 @@ export default function PersonnelPage() {
     setCategoriasSeleccionadas((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
   }
 
+  function toggleTodasCategorias() {
+    setCategoriasSeleccionadas((prev) => (prev.length === categorias.length ? [] : categorias.map((c) => c.clave)));
+  }
+
   async function handleInvitar(e) {
     e.preventDefault();
     setErrorModal('');
@@ -239,7 +243,18 @@ export default function PersonnelPage() {
 
             {rol === ROLES.USER ? (
               <div>
-                <span className="mb-2 block text-sm font-medium text-slate-700">Categorias permitidas</span>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-700">Categorias permitidas</span>
+                  <label className="flex items-center gap-2 text-xs font-medium text-primary">
+                    <input
+                      type="checkbox"
+                      checked={categorias.length > 0 && categoriasSeleccionadas.length === categorias.length}
+                      onChange={toggleTodasCategorias}
+                      className="rounded border-border text-primary focus:ring-primary/30"
+                    />
+                    Seleccionar todas
+                  </label>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {categorias.map((cat) => (
                     <label key={cat.clave} className="flex items-center gap-2 text-sm text-slate-600">
