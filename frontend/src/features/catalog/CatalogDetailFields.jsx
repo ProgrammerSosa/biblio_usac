@@ -25,7 +25,6 @@ export default function CatalogDetailFields({ item }) {
         <DetalleCampo key={campo.clave} label={campo.etiqueta} valor={item.atributos?.[campo.clave]} />
       ))}
       <DetalleCampo label="Revisado por Admin" valor={item.revisadoPorAdmin?.nombre} />
-      <DetalleCampo label="Revisado por Manager" valor={item.revisadoPorManager?.nombre} />
       {item.estadoRevision === ESTADOS_REVISION.RECHAZADO ? (
         <div className="col-span-full">
           <DetalleCampo label="Motivo de rechazo" valor={item.observaciones} destacado />

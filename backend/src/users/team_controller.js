@@ -12,8 +12,7 @@ function inicioDeHoy() {
 
 function estadoVacio() {
   return {
-    [ESTADOS_REVISION.PENDIENTE_ADMIN]: 0,
-    [ESTADOS_REVISION.PENDIENTE_MANAGER]: 0,
+    [ESTADOS_REVISION.PENDIENTE]: 0,
     [ESTADOS_REVISION.APROBADO]: 0,
     [ESTADOS_REVISION.RECHAZADO]: 0,
   };

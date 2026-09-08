@@ -43,7 +43,7 @@ const catalogSchema = new mongoose.Schema(
     estadoRevision: {
       type: String,
       enum: Object.values(ESTADOS_REVISION),
-      default: ESTADOS_REVISION.PENDIENTE_ADMIN,
+      default: ESTADOS_REVISION.PENDIENTE,
     },
     observaciones: { type: String, trim: true },
 
@@ -53,11 +53,6 @@ const catalogSchema = new mongoose.Schema(
       required: true,
     },
     revisadoPorAdmin: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-    revisadoPorManager: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,

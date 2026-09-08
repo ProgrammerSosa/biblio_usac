@@ -104,7 +104,7 @@ export default function CatalogListPage() {
 
   function puedeEditar(item) {
     const esAutor = item.registradoPor?._id === user?.id;
-    const estadoEditable = [ESTADOS_REVISION.PENDIENTE_ADMIN, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
+    const estadoEditable = [ESTADOS_REVISION.PENDIENTE, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
     return esAutor && estadoEditable;
   }
 

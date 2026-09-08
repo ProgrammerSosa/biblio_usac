@@ -3,14 +3,13 @@ import Badge from './Badge';
 import { ESTADO_REVISION_LABELS } from '../constants';
 
 const CONFIG = {
-  PENDIENTE_ADMIN: { tone: 'neutral', icon: Clock },
-  PENDIENTE_MANAGER: { tone: 'warning', icon: Clock },
+  PENDIENTE: { tone: 'neutral', icon: Clock },
   APROBADO: { tone: 'success', icon: CheckCircle2 },
   RECHAZADO: { tone: 'danger', icon: XCircle },
 };
 
 export default function EstadoRevisionBadge({ estado }) {
-  const config = CONFIG[estado] || CONFIG.PENDIENTE_ADMIN;
+  const config = CONFIG[estado] || CONFIG.PENDIENTE;
   return (
     <Badge tone={config.tone} icon={config.icon}>
       {ESTADO_REVISION_LABELS[estado] || estado}

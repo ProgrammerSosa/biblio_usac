@@ -39,7 +39,7 @@ export default function TeamPage() {
     {
       key: 'pendiente',
       header: 'Pendientes',
-      render: (fila) => (fila.porEstado.PENDIENTE_ADMIN || 0) + (fila.porEstado.PENDIENTE_MANAGER || 0),
+      render: (fila) => fila.porEstado.PENDIENTE || 0,
     },
     {
       key: 'aprobado',

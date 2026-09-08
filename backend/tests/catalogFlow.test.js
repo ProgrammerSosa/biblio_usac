@@ -109,15 +109,15 @@ function diccionarioValido(noInventario) {
   };
 }
 
-describe('Flujo de 2 filtros', () => {
-  test('un registro nuevo inicia en PENDIENTE_ADMIN y queda auditado', async () => {
+describe('Flujo de aprobacion (1 filtro, solo Admin)', () => {
+  test('un registro nuevo inicia en PENDIENTE y queda auditado', async () => {
     const res = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${userToken}`)
       .send(libroValido('INV-001'));
 
     expect(res.status).toBe(201);
-    expect(res.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE_ADMIN);
+    expect(res.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE);
 
     const auditoria = await Audit.find({ entidadId: res.body.data._id });
     expect(auditoria).toHaveLength(1);
@@ -133,7 +133,7 @@ describe('Flujo de 2 filtros', () => {
     expect(res.status).toBe(403);
   });
 
-  test('camino feliz: Admin aprueba (filtro 1) y Manager aprueba (filtro 2)', async () => {
+  test('camino feliz: el Admin aprueba y el registro queda Aprobado', async () => {
     const creado = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${userToken}`)
@@ -141,31 +141,33 @@ describe('Flujo de 2 filtros', () => {
 
     const id = creado.body.data._id;
 
-    const filtro1 = await api(app)
+    const revision = await api(app)
       .patch(`/api/catalog/${id}/revisar`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ decision: 'APROBAR' });
 
-    expect(filtro1.status).toBe(200);
-    expect(filtro1.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE_MANAGER);
+    expect(revision.status).toBe(200);
+    expect(revision.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
 
-    const filtro2 = await api(app)
-      .patch(`/api/catalog/${id}/aprobar`)
+    const auditoria = await Audit.find({ entidadId: id }).sort({ fecha: 1 });
+    expect(auditoria.map((a) => a.accion)).toEqual([ACCIONES_AUDITORIA.CREAR, ACCIONES_AUDITORIA.APROBAR]);
+  });
+
+  test('el Manager ya no puede aprobar registros', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('INV-003B'));
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
       .set('Authorization', `Bearer ${managerToken}`)
       .send({ decision: 'APROBAR' });
 
-    expect(filtro2.status).toBe(200);
-    expect(filtro2.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
-
-    const auditoria = await Audit.find({ entidadId: id }).sort({ fecha: 1 });
-    expect(auditoria.map((a) => a.accion)).toEqual([
-      ACCIONES_AUDITORIA.CREAR,
-      ACCIONES_AUDITORIA.APROBAR,
-      ACCIONES_AUDITORIA.APROBAR,
-    ]);
+    expect(res.status).toBe(403);
   });
 
-  test('camino de rechazo: Admin rechaza, autor edita y el registro vuelve a PENDIENTE_ADMIN', async () => {
+  test('camino de rechazo: Admin rechaza, autor edita y el registro vuelve a PENDIENTE', async () => {
     const creado = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${userToken}`)
@@ -187,7 +189,7 @@ describe('Flujo de 2 filtros', () => {
       .send({ autor: 'Autor Corregido' });
 
     expect(edicion.status).toBe(200);
-    expect(edicion.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE_ADMIN);
+    expect(edicion.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE);
     expect(edicion.body.data.autor).toBe('Autor Corregido');
 
     const auditoria = await Audit.find({ entidadId: id }).sort({ fecha: 1 });
@@ -208,6 +210,79 @@ describe('Flujo de 2 filtros', () => {
       .patch(`/api/catalog/${creado.body.data._id}/revisar`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ decision: 'RECHAZAR' });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Aprobacion en lote (solo Admin)', () => {
+  test('Admin puede aprobar varios registros pendientes de una sola vez', async () => {
+    const ids = [];
+    for (const noInv of ['LOTE-001', 'LOTE-002', 'LOTE-003']) {
+      const creado = await api(app)
+        .post('/api/catalog')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send(libroValido(noInv));
+      ids.push(creado.body.data._id);
+    }
+
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aprobados).toBe(3);
+
+    for (const id of ids) {
+      const item = await api(app).get(`/api/catalog/${id}`).set('Authorization', `Bearer ${adminToken}`);
+      expect(item.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
+    }
+
+    const auditoria = await Audit.find({ entidadId: { $in: ids }, accion: ACCIONES_AUDITORIA.APROBAR });
+    expect(auditoria).toHaveLength(3);
+  });
+
+  test('el lote ignora los registros que no esten pendientes', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('LOTE-004'));
+    const id = creado.body.data._id;
+
+    await api(app)
+      .patch(`/api/catalog/${id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids: [id] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aprobados).toBe(0);
+  });
+
+  test('el Manager no puede usar la aprobacion en lote', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('LOTE-005'));
+
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ ids: [creado.body.data._id] });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('rechaza la peticion si no se envian ids', async () => {
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids: [] });
 
     expect(res.status).toBe(400);
   });
@@ -287,10 +362,6 @@ describe('Correccion de registros por Admin/Manager', () => {
     await api(app)
       .patch(`/api/catalog/${id}/revisar`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
-    await api(app)
-      .patch(`/api/catalog/${id}/aprobar`)
-      .set('Authorization', `Bearer ${managerToken}`)
       .send({ decision: 'APROBAR' });
 
     const correccion = await api(app)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, ClipboardCheck } from 'lucide-react';
+import { CheckCircle2, XCircle, ClipboardCheck, ListChecks } from 'lucide-react';
 import { catalogApi } from '../catalog/catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -16,30 +16,32 @@ import { Textarea } from '../../shared/components/FormField';
 import CatalogDetailFields from '../catalog/CatalogDetailFields';
 
 const TABS = [
-  { value: ESTADOS_REVISION.PENDIENTE_ADMIN, label: 'Pendiente Admin', filtro: ROLES.ADMIN },
-  { value: ESTADOS_REVISION.PENDIENTE_MANAGER, label: 'Pendiente Manager', filtro: ROLES.MANAGER },
-  { value: ESTADOS_REVISION.APROBADO, label: 'Aprobado', filtro: null },
+  { value: ESTADOS_REVISION.PENDIENTE, label: 'Pendientes' },
+  { value: ESTADOS_REVISION.APROBADO, label: 'Aprobados' },
 ];
 
 export default function ApprovalsPage() {
   const { user } = useAuth();
   const { etiquetaDe } = useCategories();
-  const [activeTab, setActiveTab] = useState(
-    user?.rol === ROLES.ADMIN ? ESTADOS_REVISION.PENDIENTE_ADMIN : ESTADOS_REVISION.PENDIENTE_MANAGER
-  );
+  const [activeTab, setActiveTab] = useState(ESTADOS_REVISION.PENDIENTE);
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [mensaje, setMensaje] = useState('');
+  const [seleccionados, setSeleccionados] = useState(new Set());
   const [itemEnRevision, setItemEnRevision] = useState(null);
   const [decision, setDecision] = useState('APROBAR');
   const [observaciones, setObservaciones] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [errorModal, setErrorModal] = useState('');
+  const [loteAbierto, setLoteAbierto] = useState(false);
+  const [aprobandoLote, setAprobandoLote] = useState(false);
+  const [errorLote, setErrorLote] = useState('');
 
-  const tabActual = TABS.find((t) => t.value === activeTab);
-  const puedeActuar = tabActual?.filtro === user?.rol;
+  const esAdmin = user?.rol === ROLES.ADMIN;
+  const puedeActuar = esAdmin && activeTab === ESTADOS_REVISION.PENDIENTE;
 
   async function cargar() {
     setLoading(true);
@@ -57,8 +59,25 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     cargar();
+    setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, page]);
+
+  function toggleUno(id) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTodos() {
+    setSeleccionados((prev) => {
+      const todosSeleccionados = registros.length > 0 && registros.every((r) => prev.has(r._id));
+      return todosSeleccionados ? new Set() : new Set(registros.map((r) => r._id));
+    });
+  }
 
   function abrirRevision(item) {
     setItemEnRevision(item);
@@ -77,12 +96,9 @@ export default function ApprovalsPage() {
     setErrorModal('');
     try {
       const payload = { decision, observaciones: observaciones.trim() || undefined };
-      if (user.rol === ROLES.ADMIN) {
-        await catalogApi.revisar(itemEnRevision._id, payload);
-      } else {
-        await catalogApi.aprobar(itemEnRevision._id, payload);
-      }
+      await catalogApi.revisar(itemEnRevision._id, payload);
       setItemEnRevision(null);
+      setMensaje(decision === 'APROBAR' ? 'Registro aprobado correctamente' : 'Registro rechazado correctamente');
       await cargar();
     } catch (err) {
       setErrorModal(getErrorMessage(err, 'No se pudo procesar la decision'));
@@ -91,7 +107,48 @@ export default function ApprovalsPage() {
     }
   }
 
+  async function confirmarLote() {
+    setAprobandoLote(true);
+    setErrorLote('');
+    try {
+      const res = await catalogApi.aprobarLote([...seleccionados]);
+      setMensaje(`${res.data.data.aprobados} registro(s) aprobado(s) correctamente`);
+      setSeleccionados(new Set());
+      setLoteAbierto(false);
+      await cargar();
+    } catch (err) {
+      setErrorLote(getErrorMessage(err, 'No se pudo aprobar el lote'));
+    } finally {
+      setAprobandoLote(false);
+    }
+  }
+
   const columns = [
+    ...(puedeActuar
+      ? [
+          {
+            key: 'seleccion',
+            header: (
+              <input
+                type="checkbox"
+                checked={registros.length > 0 && registros.every((r) => seleccionados.has(r._id))}
+                onChange={toggleTodos}
+                className="rounded border-border text-primary focus:ring-primary/30"
+              />
+            ),
+            render: (row) => (
+              <div onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={seleccionados.has(row._id)}
+                  onChange={() => toggleUno(row._id)}
+                  className="rounded border-border text-primary focus:ring-primary/30"
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
     { key: 'noInventario', header: 'No. Inventario' },
     { key: 'categoria', header: 'Categoria', render: (row) => etiquetaDe(row.categoria) },
     { key: 'titulo', header: 'Titulo' },
@@ -128,6 +185,12 @@ export default function ApprovalsPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Aprobaciones</h1>
+      {!esAdmin ? (
+        <p className="text-sm text-slate-500">
+          Solo el Admin aprueba materiales. Aqui puedes ver el estado de la cola de revision; si algo esta mal puedes
+          corregirlo directamente desde el Catalogo.
+        </p>
+      ) : null}
 
       <Tabs
         tabs={TABS}
@@ -139,6 +202,24 @@ export default function ApprovalsPage() {
       />
 
       <AlertBanner>{error}</AlertBanner>
+      <AlertBanner type="success">{mensaje}</AlertBanner>
+
+      {puedeActuar && seleccionados.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-primary-dark">
+            {seleccionados.size} registro{seleccionados.size === 1 ? '' : 's'} seleccionado
+            {seleccionados.size === 1 ? '' : 's'}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setSeleccionados(new Set())}>
+              Cancelar seleccion
+            </Button>
+            <Button icon={ListChecks} onClick={() => setLoteAbierto(true)}>
+              Aprobar seleccionados
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <DataTable
         columns={columns}
@@ -204,6 +285,30 @@ export default function ApprovalsPage() {
           ) : null}
 
           <AlertBanner>{errorModal}</AlertBanner>
+        </div>
+      </Modal>
+
+      <Modal
+        open={loteAbierto}
+        title="Aprobar registros seleccionados"
+        onClose={() => setLoteAbierto(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLoteAbierto(false)}>
+              Cancelar
+            </Button>
+            <Button icon={CheckCircle2} onClick={confirmarLote} disabled={aprobandoLote}>
+              {aprobandoLote ? 'Aprobando...' : `Aprobar ${seleccionados.size} registro(s)`}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-600">
+            Vas a aprobar <strong>{seleccionados.size}</strong> registro{seleccionados.size === 1 ? '' : 's'} de una
+            vez. Quedaran marcados como Aprobados y saldran de la cola de pendientes.
+          </p>
+          <AlertBanner>{errorLote}</AlertBanner>
         </div>
       </Modal>
     </div>

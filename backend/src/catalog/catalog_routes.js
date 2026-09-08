@@ -7,7 +7,7 @@ const {
   getItem,
   updateOwnItem,
   reviewByAdmin,
-  approveByManager,
+  aprobarLote,
   deleteItem,
 } = require('./catalog_controller');
 
@@ -17,10 +17,10 @@ router.use(verifyJWT);
 
 router.get('/', listItems);
 router.post('/', createItem);
+router.patch('/aprobar-lote', checkRole(ROLES.ADMIN), aprobarLote);
 router.get('/:id', getItem);
 router.patch('/:id', updateOwnItem);
 router.patch('/:id/revisar', checkRole(ROLES.ADMIN), reviewByAdmin);
-router.patch('/:id/aprobar', checkRole(ROLES.MANAGER), approveByManager);
 router.delete('/:id', checkRole(ROLES.MANAGER), deleteItem);
 
 module.exports = router;

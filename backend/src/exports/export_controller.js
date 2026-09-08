@@ -7,8 +7,7 @@ const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
 const { fail } = require('../../utils/httpResponse');
 
 const ESTADO_LABELS = {
-  PENDIENTE_ADMIN: 'Pendiente Admin',
-  PENDIENTE_MANAGER: 'Pendiente Manager',
+  PENDIENTE: 'Pendiente',
   APROBADO: 'Aprobado',
   RECHAZADO: 'Rechazado',
 };

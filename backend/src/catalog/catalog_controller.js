@@ -84,7 +84,6 @@ async function listItems(req, res, next) {
       Catalog.find(filtro)
         .populate('registradoPor', 'nombre email')
         .populate('revisadoPorAdmin', 'nombre email')
-        .populate('revisadoPorManager', 'nombre email')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
@@ -106,8 +105,7 @@ async function getItem(req, res, next) {
   try {
     const item = await Catalog.findOne({ _id: req.params.id, eliminado: false })
       .populate('registradoPor', 'nombre email')
-      .populate('revisadoPorAdmin', 'nombre email')
-      .populate('revisadoPorManager', 'nombre email');
+      .populate('revisadoPorAdmin', 'nombre email');
 
     if (!item) {
       return notFound(res, 'Registro no encontrado');
@@ -134,7 +132,7 @@ async function updateOwnItem(req, res, next) {
     }
 
     if (esAutor && !esSupervisor) {
-      const editable = [ESTADOS_REVISION.PENDIENTE_ADMIN, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
+      const editable = [ESTADOS_REVISION.PENDIENTE, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
       if (!editable) {
         return fail(res, 'Este registro ya no se puede editar en su estado actual', 409);
       }
@@ -147,7 +145,7 @@ async function updateOwnItem(req, res, next) {
     Object.assign(item, pickCatalogFields(req.body));
 
     if (esAutor && estadoAnterior === ESTADOS_REVISION.RECHAZADO) {
-      item.estadoRevision = ESTADOS_REVISION.PENDIENTE_ADMIN;
+      item.estadoRevision = ESTADOS_REVISION.PENDIENTE;
     }
 
     await item.save();
@@ -179,14 +177,14 @@ async function reviewByAdmin(req, res, next) {
       return notFound(res, 'Registro no encontrado');
     }
 
-    if (item.estadoRevision !== ESTADOS_REVISION.PENDIENTE_ADMIN) {
-      return fail(res, 'Este registro no esta pendiente del filtro de Admin', 409);
+    if (item.estadoRevision !== ESTADOS_REVISION.PENDIENTE) {
+      return fail(res, 'Este registro no esta pendiente de revision', 409);
     }
 
     Object.assign(item, pickCatalogFields(req.body));
 
     if (decision === 'APROBAR') {
-      item.estadoRevision = ESTADOS_REVISION.PENDIENTE_MANAGER;
+      item.estadoRevision = ESTADOS_REVISION.APROBADO;
     } else {
       if (!observaciones) {
         return fail(res, 'Las observaciones son obligatorias al rechazar un registro');
@@ -203,7 +201,7 @@ async function reviewByAdmin(req, res, next) {
       entidad: 'Catalog',
       entidadId: item._id,
       usuario: req.user.userId,
-      detalles: { filtro: 'ADMIN', estadoNuevo: item.estadoRevision },
+      detalles: { estadoNuevo: item.estadoRevision },
     });
 
     return ok(res, item);
@@ -212,45 +210,35 @@ async function reviewByAdmin(req, res, next) {
   }
 }
 
-async function approveByManager(req, res, next) {
+async function aprobarLote(req, res, next) {
   try {
-    const { decision, observaciones } = req.body;
+    const { ids } = req.body;
 
-    if (!['APROBAR', 'RECHAZAR'].includes(decision)) {
-      return fail(res, "La decision debe ser 'APROBAR' o 'RECHAZAR'");
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return fail(res, 'Debes indicar al menos un registro para aprobar');
     }
 
-    const item = await Catalog.findOne({ _id: req.params.id, eliminado: false });
-    if (!item) {
-      return notFound(res, 'Registro no encontrado');
-    }
-
-    if (item.estadoRevision !== ESTADOS_REVISION.PENDIENTE_MANAGER) {
-      return fail(res, 'Este registro no esta pendiente del filtro de Manager', 409);
-    }
-
-    if (decision === 'APROBAR') {
-      item.estadoRevision = ESTADOS_REVISION.APROBADO;
-    } else {
-      if (!observaciones) {
-        return fail(res, 'Las observaciones son obligatorias al rechazar un registro');
-      }
-      item.estadoRevision = ESTADOS_REVISION.RECHAZADO;
-      item.observaciones = observaciones;
-    }
-    item.revisadoPorManager = req.user.userId;
-
-    await item.save();
-
-    await registrarAuditoria({
-      accion: decision === 'APROBAR' ? ACCIONES_AUDITORIA.APROBAR : ACCIONES_AUDITORIA.RECHAZAR,
-      entidad: 'Catalog',
-      entidadId: item._id,
-      usuario: req.user.userId,
-      detalles: { filtro: 'MANAGER', estadoNuevo: item.estadoRevision },
+    const registros = await Catalog.find({
+      _id: { $in: ids },
+      eliminado: false,
+      estadoRevision: ESTADOS_REVISION.PENDIENTE,
     });
 
-    return ok(res, item);
+    for (const item of registros) {
+      item.estadoRevision = ESTADOS_REVISION.APROBADO;
+      item.revisadoPorAdmin = req.user.userId;
+      await item.save();
+
+      await registrarAuditoria({
+        accion: ACCIONES_AUDITORIA.APROBAR,
+        entidad: 'Catalog',
+        entidadId: item._id,
+        usuario: req.user.userId,
+        detalles: { estadoNuevo: item.estadoRevision, lote: true },
+      });
+    }
+
+    return ok(res, { aprobados: registros.length }, `${registros.length} registro(s) aprobado(s)`);
   } catch (err) {
     return next(err);
   }
@@ -286,6 +274,6 @@ module.exports = {
   getItem,
   updateOwnItem,
   reviewByAdmin,
-  approveByManager,
+  aprobarLote,
   deleteItem,
 };

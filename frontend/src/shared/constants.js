@@ -11,15 +11,13 @@ export const ROL_LABELS = {
 };
 
 export const ESTADOS_REVISION = {
-  PENDIENTE_ADMIN: 'PENDIENTE_ADMIN',
-  PENDIENTE_MANAGER: 'PENDIENTE_MANAGER',
+  PENDIENTE: 'PENDIENTE',
   APROBADO: 'APROBADO',
   RECHAZADO: 'RECHAZADO',
 };
 
 export const ESTADO_REVISION_LABELS = {
-  PENDIENTE_ADMIN: 'Pendiente Admin',
-  PENDIENTE_MANAGER: 'Pendiente Manager',
+  PENDIENTE: 'Pendiente',
   APROBADO: 'Aprobado',
   RECHAZADO: 'Rechazado',
 };

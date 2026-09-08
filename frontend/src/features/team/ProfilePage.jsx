@@ -87,10 +87,7 @@ export default function ProfilePage() {
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Estado de sus registros</h2>
             <div className="flex flex-wrap gap-2">
               <Badge tone="neutral">
-                {ESTADO_REVISION_LABELS.PENDIENTE_ADMIN}: {perfil.porEstado.PENDIENTE_ADMIN || 0}
-              </Badge>
-              <Badge tone="warning">
-                {ESTADO_REVISION_LABELS.PENDIENTE_MANAGER}: {perfil.porEstado.PENDIENTE_MANAGER || 0}
+                {ESTADO_REVISION_LABELS.PENDIENTE}: {perfil.porEstado.PENDIENTE || 0}
               </Badge>
               <Badge tone="success">
                 {ESTADO_REVISION_LABELS.APROBADO}: {perfil.porEstado.APROBADO || 0}
