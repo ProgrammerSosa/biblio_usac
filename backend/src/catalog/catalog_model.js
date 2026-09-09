@@ -10,10 +10,14 @@ const catalogSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
+    // No siempre se conoce al momento de registrar (ej. importando materiales viejos que
+    // aun no tienen numero fisico asignado) - por eso no es obligatorio a nivel de esquema,
+    // aunque el formulario de registro manual si lo exige. "sparse" permite que muchos
+    // registros queden sin valor a la vez, sin romper la unicidad entre los que si lo tienen.
     noInventario: {
       type: String,
-      required: [true, 'El numero de inventario es obligatorio'],
       unique: true,
+      sparse: true,
       trim: true,
     },
     autor: {
@@ -47,11 +51,21 @@ const catalogSchema = new mongoose.Schema(
     },
     observaciones: { type: String, trim: true },
 
+    // Quien registra puede ir armando su lista antes de mandarla a revision. Mientras
+    // enviado sea false, el registro solo lo ve su autor (borrador personal); nadie mas,
+    // incluyendo Admin/Manager, lo ve hasta que se envia.
+    enviado: { type: Boolean, default: false },
+
     registradoPor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
     },
+    // Nombre del archivo Excel de origen, solo cuando el registro vino de una importacion
+    // (ver confirmarImportacion). registradoPor sigue siendo quien la ejecuto, pero en la
+    // interfaz se prefiere mostrar de que archivo vino, para no confundirlo con que esa
+    // persona lo capturo a mano.
+    origenImportacion: { type: String, trim: true, default: null },
     revisadoPorAdmin: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

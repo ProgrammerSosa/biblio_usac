@@ -5,6 +5,7 @@ import LoginPage from '../features/auth/LoginPage';
 import RegisterPage from '../features/auth/RegisterPage';
 import CatalogListPage from '../features/catalog/CatalogListPage';
 import CatalogFormPage from '../features/catalog/CatalogFormPage';
+import ImportPage from '../features/catalog/ImportPage';
 import ApprovalsPage from '../features/approvals/ApprovalsPage';
 import AuditPage from '../features/audit/AuditPage';
 import PersonnelPage from '../features/users/PersonnelPage';
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
           {
             element: <RequireRole roles={['ADMIN', 'MANAGER']} />,
             children: [
+              { path: '/catalogo/importar', element: <ImportPage /> },
               { path: '/aprobaciones', element: <ApprovalsPage /> },
               { path: '/auditoria', element: <AuditPage /> },
               { path: '/equipo', element: <TeamPage /> },

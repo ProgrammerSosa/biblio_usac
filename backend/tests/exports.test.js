@@ -89,4 +89,46 @@ describe('Exportacion de catalogo a PDF', () => {
       .set('Authorization', `Bearer ${managerToken}`);
     expect(res.status).toBe(404);
   });
+
+  test('el filtro "buscar" de la barra de busqueda tambien aplica al exportar', async () => {
+    const managerToken = await crearUsuarioConToken(ROLES.MANAGER);
+    const manager = await User.findOne({ rol: ROLES.MANAGER });
+
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-2',
+      autor: 'Autor Distinto',
+      titulo: 'Un titulo que no coincide',
+      atributos: { EDITORIAL: 'Editorial USAC', ISBN: '000', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      registradoPor: manager._id,
+    });
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-3',
+      autor: 'Autor Buscado',
+      titulo: 'Titulo Cualquiera',
+      atributos: { EDITORIAL: 'Editorial USAC', ISBN: '111', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      registradoPor: manager._id,
+    });
+
+    const conBusqueda = await api(app)
+      .get('/api/exports/catalog?buscar=Autor Buscado')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+
+    expect(conBusqueda.status).toBe(200);
+
+    const sinCoincidencia = await api(app)
+      .get('/api/exports/catalog?buscar=NoExisteEsteTexto')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(sinCoincidencia.status).toBe(404);
+  });
 });

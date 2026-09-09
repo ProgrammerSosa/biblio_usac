@@ -109,6 +109,17 @@ function diccionarioValido(noInventario) {
   };
 }
 
+// Un registro nuevo nace como borrador (solo lo ve su autor). La mayoria de pruebas de
+// aqui en adelante necesitan que ya este enviado, para poder probar lo que pasa despues
+// (revisar, aprobar en lote, verlo desde otra cuenta, etc).
+async function crearYEnviar(token, datos) {
+  const creado = await api(app).post('/api/catalog').set('Authorization', `Bearer ${token}`).send(datos);
+  if (creado.status === 201) {
+    await api(app).patch('/api/catalog/enviar-lote').set('Authorization', `Bearer ${token}`).send({ ids: [creado.body.data._id] });
+  }
+  return creado;
+}
+
 describe('Flujo de aprobacion (1 filtro, solo Admin)', () => {
   test('un registro nuevo inicia en PENDIENTE y queda auditado', async () => {
     const res = await api(app)
@@ -134,10 +145,7 @@ describe('Flujo de aprobacion (1 filtro, solo Admin)', () => {
   });
 
   test('camino feliz: el Admin aprueba y el registro queda Aprobado', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-003'));
+    const creado = await crearYEnviar(userToken, libroValido('INV-003'));
 
     const id = creado.body.data._id;
 
@@ -150,28 +158,41 @@ describe('Flujo de aprobacion (1 filtro, solo Admin)', () => {
     expect(revision.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
 
     const auditoria = await Audit.find({ entidadId: id }).sort({ fecha: 1 });
-    expect(auditoria.map((a) => a.accion)).toEqual([ACCIONES_AUDITORIA.CREAR, ACCIONES_AUDITORIA.APROBAR]);
+    expect(auditoria.map((a) => a.accion)).toEqual([
+      ACCIONES_AUDITORIA.CREAR,
+      ACCIONES_AUDITORIA.ENVIAR,
+      ACCIONES_AUDITORIA.APROBAR,
+    ]);
   });
 
-  test('el Manager ya no puede aprobar registros', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-003B'));
+  test('el Manager tambien puede aprobar registros (misma logica de 1 filtro)', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('INV-003B'));
 
     const res = await api(app)
       .patch(`/api/catalog/${creado.body.data._id}/revisar`)
       .set('Authorization', `Bearer ${managerToken}`)
       .send({ decision: 'APROBAR' });
 
+    expect(res.status).toBe(200);
+    expect(res.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
+  });
+
+  test('un Auxiliar no puede revisar/aprobar registros', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('INV-003C'));
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ decision: 'APROBAR' });
+
     expect(res.status).toBe(403);
   });
 
   test('camino de rechazo: Admin rechaza, autor edita y el registro vuelve a PENDIENTE', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-004'));
+    const creado = await crearYEnviar(userToken, libroValido('INV-004'));
 
     const id = creado.body.data._id;
 
@@ -195,16 +216,14 @@ describe('Flujo de aprobacion (1 filtro, solo Admin)', () => {
     const auditoria = await Audit.find({ entidadId: id }).sort({ fecha: 1 });
     expect(auditoria.map((a) => a.accion)).toEqual([
       ACCIONES_AUDITORIA.CREAR,
+      ACCIONES_AUDITORIA.ENVIAR,
       ACCIONES_AUDITORIA.RECHAZAR,
       ACCIONES_AUDITORIA.EDITAR,
     ]);
   });
 
   test('rechaza el rechazo sin observaciones', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-005'));
+    const creado = await crearYEnviar(userToken, libroValido('INV-005'));
 
     const res = await api(app)
       .patch(`/api/catalog/${creado.body.data._id}/revisar`)
@@ -219,10 +238,7 @@ describe('Aprobacion en lote (solo Admin)', () => {
   test('Admin puede aprobar varios registros pendientes de una sola vez', async () => {
     const ids = [];
     for (const noInv of ['LOTE-001', 'LOTE-002', 'LOTE-003']) {
-      const creado = await api(app)
-        .post('/api/catalog')
-        .set('Authorization', `Bearer ${userToken}`)
-        .send(libroValido(noInv));
+      const creado = await crearYEnviar(userToken, libroValido(noInv));
       ids.push(creado.body.data._id);
     }
 
@@ -244,10 +260,7 @@ describe('Aprobacion en lote (solo Admin)', () => {
   });
 
   test('el lote ignora los registros que no esten pendientes', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('LOTE-004'));
+    const creado = await crearYEnviar(userToken, libroValido('LOTE-004'));
     const id = creado.body.data._id;
 
     await api(app)
@@ -264,15 +277,27 @@ describe('Aprobacion en lote (solo Admin)', () => {
     expect(res.body.data.aprobados).toBe(0);
   });
 
-  test('el Manager no puede usar la aprobacion en lote', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('LOTE-005'));
+  test('el Manager tambien puede usar la aprobacion en lote', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('LOTE-005'));
 
     const res = await api(app)
       .patch('/api/catalog/aprobar-lote')
       .set('Authorization', `Bearer ${managerToken}`)
+      .send({ ids: [creado.body.data._id] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aprobados).toBe(1);
+  });
+
+  test('un Auxiliar no puede usar la aprobacion en lote', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('LOTE-006'));
+
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${userToken}`)
       .send({ ids: [creado.body.data._id] });
 
     expect(res.status).toBe(403);
@@ -288,12 +313,80 @@ describe('Aprobacion en lote (solo Admin)', () => {
   });
 });
 
-describe('Obtener un registro individual', () => {
-  test('GET /api/catalog/:id devuelve el registro con sus datos poblados', async () => {
-    const creado = await api(app)
+describe('No. de Inventario opcional (para materiales importados sin numero asignado)', () => {
+  test('se puede crear un registro sin noInventario', async () => {
+    const datos = libroValido(undefined);
+    delete datos.noInventario;
+
+    const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.noInventario).toBeFalsy();
+  });
+
+  test('varios registros sin noInventario pueden coexistir (no chocan entre si)', async () => {
+    const datos1 = libroValido(undefined);
+    delete datos1.noInventario;
+    const datos2 = { ...libroValido(undefined), titulo: 'Otro titulo' };
+    delete datos2.noInventario;
+
+    const res1 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos1);
+    const res2 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos2);
+
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+  });
+
+  test('cuando si se indica, el noInventario sigue teniendo que ser unico', async () => {
+    await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido('INV-DUP'));
+    const res = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-007'));
+      .send({ ...libroValido('INV-DUP'), titulo: 'Titulo distinto' });
+
+    expect(res.status).toBe(409);
+  });
+
+  // El formulario del frontend manda noInventario: '' (no omite el campo) cuando se deja en
+  // blanco. Eso no es lo mismo para el indice unique+sparse de Mongo: solo salta el indice
+  // cuando el campo esta ausente, no cuando vale ''. Sin limpiar la cadena vacia antes de
+  // guardar, el primer registro en blanco se crea bien pero el segundo choca como si "" fuera
+  // un No. de Inventario duplicado - exactamente el payload que manda el formulario real.
+  test('varios registros con noInventario: "" (como lo manda el formulario) tambien pueden coexistir', async () => {
+    const res1 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido(''));
+    const res2 = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ ...libroValido(''), titulo: 'Otro titulo' });
+
+    expect(res1.status).toBe(201);
+    expect(res1.body.data.noInventario).toBeFalsy();
+    expect(res2.status).toBe(201);
+    expect(res2.body.data.noInventario).toBeFalsy();
+  });
+
+  test('editar un registro para dejarle noInventario: "" lo desasigna de verdad (no lo deja como "")', async () => {
+    const creado = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido('INV-A-QUITAR'));
+
+    const editado = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ noInventario: '' });
+    expect(editado.status).toBe(200);
+    expect(editado.body.data.noInventario).toBeFalsy();
+
+    // Si de verdad quedo desasignado (no en ""), otro registro en blanco no deberia chocar.
+    const otro = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ ...libroValido(''), titulo: 'Otro mas' });
+    expect(otro.status).toBe(201);
+  });
+});
+
+describe('Obtener un registro individual', () => {
+  test('GET /api/catalog/:id devuelve el registro con sus datos poblados', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('INV-007'));
 
     const res = await api(app)
       .get(`/api/catalog/${creado.body.data._id}`)
@@ -334,7 +427,7 @@ describe('Auditoria', () => {
 
 describe('Filtro por registradoPor', () => {
   test('GET /api/catalog?registradoPor= solo devuelve los registros de ese usuario', async () => {
-    await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido('INV-010'));
+    await crearYEnviar(userToken, libroValido('INV-010'));
     const otroCreado = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -352,17 +445,9 @@ describe('Filtro por registradoPor', () => {
 });
 
 describe('Correccion de registros por Admin/Manager', () => {
-  test('Admin puede corregir un registro incluso ya APROBADO, sin reiniciar el flujo', async () => {
-    const creado = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(libroValido('INV-020'));
+  test('Admin puede corregir un registro Pendiente o Rechazado de otra persona sin reiniciar el flujo', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('INV-019'));
     const id = creado.body.data._id;
-
-    await api(app)
-      .patch(`/api/catalog/${id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
 
     const correccion = await api(app)
       .patch(`/api/catalog/${id}`)
@@ -371,7 +456,33 @@ describe('Correccion de registros por Admin/Manager', () => {
 
     expect(correccion.status).toBe(200);
     expect(correccion.body.data.autor).toBe('Autor Corregido Por Admin');
-    expect(correccion.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
+    expect(correccion.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE);
+  });
+
+  test('un registro ya APROBADO, el Admin ya no lo puede corregir (solo la Manager)', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('INV-020'));
+    const id = creado.body.data._id;
+
+    await api(app)
+      .patch(`/api/catalog/${id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const intentoAdmin = await api(app)
+      .patch(`/api/catalog/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ autor: 'Intento De Admin' });
+
+    expect(intentoAdmin.status).toBe(403);
+
+    const correccionManager = await api(app)
+      .patch(`/api/catalog/${id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ autor: 'Autor Corregido Por Manager' });
+
+    expect(correccionManager.status).toBe(200);
+    expect(correccionManager.body.data.autor).toBe('Autor Corregido Por Manager');
+    expect(correccionManager.body.data.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
   });
 
   test('un Auxiliar sigue sin poder editar el registro de otra persona', async () => {

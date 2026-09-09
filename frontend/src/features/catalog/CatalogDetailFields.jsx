@@ -25,7 +25,7 @@ export default function CatalogDetailFields({ item, ocultarRevision = false }) {
       ))}
       {!ocultarRevision ? (
         <>
-          <DetalleCampo label="Revisado por Admin" valor={item.revisadoPorAdmin?.nombre} />
+          <DetalleCampo label="Revisado por" valor={item.revisadoPorAdmin?.nombre} />
           {item.estadoRevision === ESTADOS_REVISION.RECHAZADO ? (
             <div className="col-span-full">
               <DetalleCampo label="Motivo de rechazo" valor={item.observaciones} destacado />

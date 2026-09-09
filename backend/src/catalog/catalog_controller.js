@@ -1,8 +1,10 @@
 const Catalog = require('./catalog_model');
+const Category = require('./category_model');
 const User = require('../users/user_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
 const { escapeRegExp } = require('../../helpers/regex');
+const { previsualizarWorkbook } = require('../../helpers/excelImport');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
 const CAMPOS_EDITABLES = [
@@ -26,6 +28,16 @@ function pickCatalogFields(body) {
       datos[campo] = body[campo];
     }
   }
+
+  // "" no es lo mismo que ausente para el indice unique+sparse: Mongo solo salta el indice
+  // cuando el campo no existe en el documento, no cuando vale "". Sin esto, el primer registro
+  // sin numero de inventario se guarda bien, pero el segundo choca contra el primero como si
+  // fuera un No. de Inventario duplicado (los dos valen "").
+  if (typeof datos.noInventario === 'string') {
+    const limpio = datos.noInventario.trim();
+    datos.noInventario = limpio || undefined;
+  }
+
   return datos;
 }
 
@@ -64,6 +76,46 @@ async function createItem(req, res, next) {
   }
 }
 
+async function enviarLote(req, res, next) {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return fail(res, 'Debes indicar al menos un registro para enviar');
+    }
+
+    const registros = await Catalog.find({
+      _id: { $in: ids },
+      registradoPor: req.user.userId,
+      enviado: false,
+      eliminado: false,
+    });
+
+    for (const item of registros) {
+      item.enviado = true;
+      await item.save();
+
+      await registrarAuditoria({
+        accion: ACCIONES_AUDITORIA.ENVIAR,
+        entidad: 'Catalog',
+        entidadId: item._id,
+        usuario: req.user.userId,
+        detalles: { lote: true },
+      });
+    }
+
+    return ok(res, { enviados: registros.length }, `${registros.length} registro(s) enviado(s) a revision`);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+function filtroVisibilidadBorradores(userId) {
+  // Un borrador (enviado: false) solo lo puede ver quien lo creo. Todo lo ya enviado
+  // es visible para cualquiera, como siempre.
+  return { $or: [{ enviado: true }, { registradoPor: userId, enviado: false }] };
+}
+
 async function listItems(req, res, next) {
   try {
     const { estadoRevision, categoria, registradoPor, buscar, page = 1, limit = 20 } = req.query;
@@ -72,22 +124,25 @@ async function listItems(req, res, next) {
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
     if (categoria) filtro.categoria = categoria;
     if (registradoPor) filtro.registradoPor = registradoPor;
+
+    const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
     if (buscar && buscar.trim()) {
       const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
-      filtro.$or = [{ titulo: patron }, { autor: patron }, { noInventario: patron }];
+      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { noInventario: patron }] });
     }
+    const filtroFinal = { $and: clausulas };
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
 
     const [registros, total] = await Promise.all([
-      Catalog.find(filtro)
+      Catalog.find(filtroFinal)
         .populate('registradoPor', 'nombre email')
         .populate('revisadoPorAdmin', 'nombre email')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
-      Catalog.countDocuments(filtro),
+      Catalog.countDocuments(filtroFinal),
     ]);
 
     return ok(res, {
@@ -111,6 +166,10 @@ async function getItem(req, res, next) {
       return notFound(res, 'Registro no encontrado');
     }
 
+    if (!item.enviado && item.registradoPor._id.toString() !== req.user.userId) {
+      return notFound(res, 'Registro no encontrado');
+    }
+
     return ok(res, item);
   } catch (err) {
     return next(err);
@@ -125,21 +184,27 @@ async function updateOwnItem(req, res, next) {
     }
 
     const esAutor = item.registradoPor.toString() === req.user.userId;
+    const esManager = req.user.rol === ROLES.MANAGER;
     const esSupervisor = [ROLES.ADMIN, ROLES.MANAGER].includes(req.user.rol);
 
     if (!esAutor && !esSupervisor) {
       return forbidden(res, 'Solo puedes editar tus propios registros');
     }
 
-    if (esAutor && !esSupervisor) {
+    if (item.estadoRevision === ESTADOS_REVISION.APROBADO) {
+      // Una vez aprobado, solo la Manager lo puede corregir - ni el Admin ni el autor original.
+      if (!esManager) {
+        return forbidden(res, 'Un registro ya aprobado solo lo puede corregir la Manager');
+      }
+    } else if (esAutor && !esSupervisor) {
       const editable = [ESTADOS_REVISION.PENDIENTE, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
       if (!editable) {
         return fail(res, 'Este registro ya no se puede editar en su estado actual', 409);
       }
     }
 
-    // Admin/Manager pueden corregir un registro en cualquier estado (incluso ya aprobado)
-    // sin que eso reinicie el flujo de revision.
+    // Admin/Manager pueden corregir un registro Pendiente o Rechazado sin que eso reinicie
+    // el flujo de revision (solo Manager puede tocar uno ya Aprobado, validado arriba).
 
     const estadoAnterior = item.estadoRevision;
     Object.assign(item, pickCatalogFields(req.body));
@@ -164,7 +229,7 @@ async function updateOwnItem(req, res, next) {
   }
 }
 
-async function reviewByAdmin(req, res, next) {
+async function revisarMaterial(req, res, next) {
   try {
     const { decision, observaciones } = req.body;
 
@@ -173,7 +238,7 @@ async function reviewByAdmin(req, res, next) {
     }
 
     const item = await Catalog.findOne({ _id: req.params.id, eliminado: false });
-    if (!item) {
+    if (!item || !item.enviado) {
       return notFound(res, 'Registro no encontrado');
     }
 
@@ -221,6 +286,7 @@ async function aprobarLote(req, res, next) {
     const registros = await Catalog.find({
       _id: { $in: ids },
       eliminado: false,
+      enviado: true,
       estadoRevision: ESTADOS_REVISION.PENDIENTE,
     });
 
@@ -239,6 +305,100 @@ async function aprobarLote(req, res, next) {
     }
 
     return ok(res, { aprobados: registros.length }, `${registros.length} registro(s) aprobado(s)`);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function previsualizarImportacion(req, res, next) {
+  try {
+    if (!req.file) {
+      return fail(res, 'Debes subir un archivo de Excel (.xlsx)');
+    }
+
+    const categorias = await Category.find({ activo: true });
+    const categoriasPorClave = new Map(categorias.map((c) => [c.clave, c]));
+
+    const hojas = await previsualizarWorkbook(req.file.buffer, categoriasPorClave);
+
+    if (hojas.length === 0) {
+      return fail(
+        res,
+        'No se encontraron hojas reconocibles (Libros, Revistas, Diccionarios, Enciclopedias, Folletos, Publicacion institucional) con datos'
+      );
+    }
+
+    const totalItems = hojas.reduce((suma, h) => suma + h.items.length, 0);
+    const totalValidos = hojas.reduce((suma, h) => suma + h.items.filter((i) => i.valido).length, 0);
+
+    return ok(res, { hojas, totalItems, totalValidos });
+  } catch (err) {
+    if (err.message && err.message.toLowerCase().includes('central directory')) {
+      return fail(res, 'El archivo no parece ser un Excel valido (.xlsx)');
+    }
+    return next(err);
+  }
+}
+
+async function confirmarImportacion(req, res, next) {
+  try {
+    const { items, archivoOrigen } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return fail(res, 'No hay materiales para importar');
+    }
+
+    let creados = 0;
+    const errores = [];
+
+    for (const item of items) {
+      const copias = Math.max(1, parseInt(item.copias, 10) || 1);
+      // Si varias filas del Excel se fusionaron en este item por ser el mismo material
+      // (100% igual salvo estado fisico), cada una pudo traer su propio No. de Inventario:
+      // se le asigna a cada copia el suyo, en el mismo orden. Si no hay tantos numeros como
+      // copias, las que sobran quedan sin numero para completarse despues con el fisico real.
+      const noInventarios =
+        Array.isArray(item.noInventarios) && item.noInventarios.length > 0
+          ? item.noInventarios
+          : [item.noInventario].filter(Boolean);
+
+      for (let i = 0; i < copias; i++) {
+        try {
+          const datos = pickCatalogFields(item);
+          const numeroDeEstaCopia = noInventarios[i];
+          if (numeroDeEstaCopia) {
+            datos.noInventario = numeroDeEstaCopia;
+          } else {
+            delete datos.noInventario;
+          }
+
+          // Queda Pendiente (no Aprobado): son datos que vienen de otra fuente y pueden
+          // necesitar correccion, asi que igual pasan por revision antes de darse por buenos.
+          const registro = await Catalog.create({
+            ...datos,
+            registradoPor: req.user.userId,
+            enviado: true,
+            estadoRevision: ESTADOS_REVISION.PENDIENTE,
+            origenImportacion: archivoOrigen ? String(archivoOrigen).trim() : null,
+          });
+
+          await registrarAuditoria({
+            accion: ACCIONES_AUDITORIA.CREAR,
+            entidad: 'Catalog',
+            entidadId: registro._id,
+            usuario: req.user.userId,
+            detalles: { categoria: registro.categoria, noInventario: registro.noInventario, importado: true },
+          });
+
+          creados += 1;
+        } catch (err) {
+          const mensaje = err.code === 11000 ? 'Ya existe un registro con ese No. de Inventario' : err.message;
+          errores.push({ titulo: item.titulo, noInventario: item.noInventario, error: mensaje });
+        }
+      }
+    }
+
+    return ok(res, { creados, errores }, `${creados} material(es) importado(s)`);
   } catch (err) {
     return next(err);
   }
@@ -273,7 +433,10 @@ module.exports = {
   listItems,
   getItem,
   updateOwnItem,
-  reviewByAdmin,
+  revisarMaterial,
   aprobarLote,
+  enviarLote,
+  previsualizarImportacion,
+  confirmarImportacion,
   deleteItem,
 };

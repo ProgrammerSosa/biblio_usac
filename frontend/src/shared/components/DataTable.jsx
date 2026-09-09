@@ -8,6 +8,7 @@ export default function DataTable({
   loading,
   emptyMessage = 'No hay registros para mostrar',
   renderExpanded,
+  rowClassName,
 }) {
   const [expandidos, setExpandidos] = useState(() => new Set());
   const expandable = !!renderExpanded;
@@ -63,7 +64,9 @@ export default function DataTable({
                 <Fragment key={id}>
                   <tr
                     onClick={expandable ? () => toggle(id) : undefined}
-                    className={`hover:bg-surface ${expandable ? 'cursor-pointer' : ''}`}
+                    className={`hover:brightness-95 ${expandable ? 'cursor-pointer' : ''} ${
+                      rowClassName ? rowClassName(row) : ''
+                    }`}
                   >
                     {expandable ? (
                       <td className="px-2 py-3 text-slate-400">

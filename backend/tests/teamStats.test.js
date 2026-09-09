@@ -52,17 +52,27 @@ beforeEach(async () => {
   auxiliar2Token = generateJWT(auxiliar2);
 
   // Auxiliar 1: 2 registros hoy + 3 registros en un dia pasado (su "mejor dia").
-  await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('A1-HOY-1'));
-  await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('A1-HOY-2'));
+  // Se envian de una vez: estas pruebas verifican visibilidad/busqueda desde otras cuentas,
+  // no el comportamiento de borrador en si.
+  const hoy1 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('A1-HOY-1'));
+  const hoy2 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('A1-HOY-2'));
+  await api(app)
+    .patch('/api/catalog/enviar-lote')
+    .set('Authorization', `Bearer ${auxiliar1Token}`)
+    .send({ ids: [hoy1.body.data._id, hoy2.body.data._id] });
 
   for (const noInv of ['A1-PASADO-1', 'A1-PASADO-2', 'A1-PASADO-3']) {
     // Mongoose respeta un createdAt explicito al crear (aunque lo protege de updateOne despues),
     // asi que se simula un registro de un dia pasado indicandolo desde la creacion.
-    await Catalog.create({ ...libro(noInv), registradoPor: auxiliar1._id, createdAt: DIA_PASADO });
+    await Catalog.create({ ...libro(noInv), registradoPor: auxiliar1._id, createdAt: DIA_PASADO, enviado: true });
   }
 
   // Auxiliar 2: 1 registro hoy.
-  await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar2Token}`).send(libro('A2-HOY-1'));
+  const hoyAux2 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar2Token}`).send(libro('A2-HOY-1'));
+  await api(app)
+    .patch('/api/catalog/enviar-lote')
+    .set('Authorization', `Bearer ${auxiliar2Token}`)
+    .send({ ids: [hoyAux2.body.data._id] });
 });
 
 afterEach(async () => {

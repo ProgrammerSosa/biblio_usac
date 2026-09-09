@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers, Send, FileSpreadsheet } from 'lucide-react';
 import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -18,9 +18,42 @@ import CatalogDetailFields from './CatalogDetailFields';
 
 const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'danger' };
 
+function RegistradoPor({ item }) {
+  if (item.origenImportacion) {
+    return (
+      <span
+        className="inline-flex max-w-[6rem] items-center gap-1 text-slate-600"
+        title={`Importado de ${item.origenImportacion}`}
+      >
+        <FileSpreadsheet size={13} className="shrink-0 text-primary" />
+        <span className="truncate">{item.origenImportacion}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="block max-w-[6rem] truncate" title={item.registradoPor?.nombre}>
+      {item.registradoPor?.nombre || 'N/A'}
+    </span>
+  );
+}
+
+function normalizarParaComparar(valor) {
+  // Datos escritos a mano (o importados de distintos Excel) casi nunca coinciden byte por
+  // byte aunque sean "el mismo autor": espacios dobles, espacios al inicio/final, mayusculas
+  // distintas, acentos puestos o no ("Garcia" vs "García"). Se normaliza antes de comparar
+  // para que esas diferencias menores no partan en dos lo que en realidad es la misma obra.
+  // Misma regla que usa el import de Excel (excelImport.js) para que ambos coincidan.
+  return (valor || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 function claveDeGrupo(item) {
   return [item.categoria, item.autor, item.titulo, item.edicion, item.idioma]
-    .map((v) => (v || '').trim().toLowerCase())
+    .map(normalizarParaComparar)
     .join('|');
 }
 
@@ -42,28 +75,46 @@ function nombreArchivoPdf() {
   return `catalogo-biblioteca-${fecha}_${hora}.pdf`;
 }
 
+function EstadoOBorrador({ item }) {
+  if (!item.enviado) {
+    return <Badge tone="warning">Borrador</Badge>;
+  }
+  return <EstadoRevisionBadge estado={item.estadoRevision} />;
+}
+
 function ResumenEstadoRevision({ copias }) {
+  if (copias.length === 1) {
+    return <EstadoOBorrador item={copias[0]} />;
+  }
+
   const cuenta = {};
   copias.forEach((c) => {
-    cuenta[c.estadoRevision] = (cuenta[c.estadoRevision] || 0) + 1;
+    const clave = c.enviado ? c.estadoRevision : 'BORRADOR';
+    cuenta[clave] = (cuenta[clave] || 0) + 1;
   });
   const distintos = Object.keys(cuenta);
 
-  if (distintos.length === 1) {
+  if (distintos.length === 1 && distintos[0] !== 'BORRADOR') {
     return <EstadoRevisionBadge estado={distintos[0]} />;
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {distintos.map((estado) => (
-        <Badge key={estado} tone={TONO_ESTADO[estado] || 'neutral'}>
-          {cuenta[estado]} {ESTADO_REVISION_LABELS[estado]}
-        </Badge>
-      ))}
+      {distintos.map((estado) =>
+        estado === 'BORRADOR' ? (
+          <Badge key={estado} tone="warning">
+            {cuenta[estado]} Borrador
+          </Badge>
+        ) : (
+          <Badge key={estado} tone={TONO_ESTADO[estado] || 'neutral'}>
+            {cuenta[estado]} {ESTADO_REVISION_LABELS[estado]}
+          </Badge>
+        )
+      )}
     </div>
   );
 }
 
-function ListaCopias({ copias, puedeEditar, esManager, onEliminar }) {
+function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <table className="w-full text-left text-sm">
@@ -79,7 +130,7 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar }) {
         <tbody className="divide-y divide-border bg-white">
           {copias.map((copia) => (
             <tr key={copia._id}>
-              <td className="px-3 py-2 font-medium text-slate-700">{copia.noInventario}</td>
+              <td className="px-3 py-2 font-medium text-slate-700">{copia.noInventario || 'N/A'}</td>
               <td className="px-3 py-2">
                 {tieneDanoFisico(copia.estadoFisico) ? (
                   <Badge tone="danger" icon={AlertTriangle}>
@@ -90,14 +141,21 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar }) {
                 )}
               </td>
               <td className="px-3 py-2">
-                <EstadoRevisionBadge estado={copia.estadoRevision} />
+                <EstadoOBorrador item={copia} />
                 {copia.estadoRevision === ESTADOS_REVISION.RECHAZADO && copia.observaciones ? (
                   <p className="mt-1 text-xs text-secondary">{copia.observaciones}</p>
                 ) : null}
               </td>
-              <td className="px-3 py-2">{copia.registradoPor?.nombre || 'N/A'}</td>
+              <td className="px-3 py-2">
+                <RegistradoPor item={copia} />
+              </td>
               <td className="px-3 py-2">
                 <div className="flex gap-2">
+                  {!copia.enviado ? (
+                    <button onClick={() => onEnviar(copia)} className="text-primary hover:text-primary-light" title="Enviar a revision">
+                      <Send size={16} />
+                    </button>
+                  ) : null}
                   {puedeEditar(copia) ? (
                     <Link to={`/catalogo/${copia._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
                       <Pencil size={16} />
@@ -134,6 +192,10 @@ export default function CatalogListPage() {
   const [itemAEliminar, setItemAEliminar] = useState(null);
   const [eliminando, setEliminando] = useState(false);
   const [exportando, setExportando] = useState(false);
+  const [seleccionados, setSeleccionados] = useState(new Set());
+  const [loteAbierto, setLoteAbierto] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [mensaje, setMensaje] = useState('');
 
   async function cargar() {
     setLoading(true);
@@ -164,6 +226,7 @@ export default function CatalogListPage() {
 
   useEffect(() => {
     cargar();
+    setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, categoria, estadoRevision, soloMios, buscar]);
 
@@ -181,6 +244,49 @@ export default function CatalogListPage() {
     }
   }
 
+  async function enviarUno(item) {
+    setError('');
+    try {
+      await catalogApi.enviarLote([item._id]);
+      setMensaje('Registro enviado a revision');
+      await cargar();
+    } catch (err) {
+      setError(getErrorMessage(err, 'No se pudo enviar el registro'));
+    }
+  }
+
+  async function confirmarLote() {
+    setEnviando(true);
+    setError('');
+    try {
+      const res = await catalogApi.enviarLote([...seleccionados]);
+      setMensaje(`${res.data.data.enviados} registro(s) enviado(s) a revision`);
+      setSeleccionados(new Set());
+      setLoteAbierto(false);
+      await cargar();
+    } catch (err) {
+      setError(getErrorMessage(err, 'No se pudo enviar el lote'));
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  function toggleUno(id) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTodos(borradores) {
+    setSeleccionados((prev) => {
+      const todosSeleccionados = borradores.length > 0 && borradores.every((b) => prev.has(b._id));
+      return todosSeleccionados ? new Set() : new Set(borradores.map((b) => b._id));
+    });
+  }
+
   async function handleExportar() {
     setExportando(true);
     setError('');
@@ -188,6 +294,7 @@ export default function CatalogListPage() {
       const params = {};
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
+      if (buscar.trim()) params.buscar = buscar.trim();
       const res = await catalogApi.exportPdf(params);
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
@@ -205,29 +312,89 @@ export default function CatalogListPage() {
   }
 
   function puedeEditar(item) {
+    if (item.estadoRevision === ESTADOS_REVISION.APROBADO) {
+      // Ya aprobado: solo la Manager lo puede corregir.
+      return user?.rol === ROLES.MANAGER;
+    }
+    const esSupervisor = [ROLES.ADMIN, ROLES.MANAGER].includes(user?.rol);
+    if (esSupervisor) return true;
     const esAutor = item.registradoPor?._id === user?.id;
     const estadoEditable = [ESTADOS_REVISION.PENDIENTE, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
     return esAutor && estadoEditable;
   }
 
   const filas = agruparRegistros(registros);
+  const borradoresEnPagina = filas.filter((f) => f.copias.length === 1 && !f.copias[0].enviado).map((f) => f.copias[0]);
 
   const columns = [
+    ...(borradoresEnPagina.length > 0
+      ? [
+          {
+            key: 'seleccion',
+            header: (
+              <input
+                type="checkbox"
+                checked={borradoresEnPagina.every((b) => seleccionados.has(b._id))}
+                onChange={() => toggleTodos(borradoresEnPagina)}
+                className="rounded border-border text-primary focus:ring-primary/30"
+              />
+            ),
+            render: (row) =>
+              row.copias.length === 1 && !row.copias[0].enviado ? (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={seleccionados.has(row.copias[0]._id)}
+                    onChange={() => toggleUno(row.copias[0]._id)}
+                    className="rounded border-border text-primary focus:ring-primary/30"
+                  />
+                </div>
+              ) : null,
+          },
+        ]
+      : []),
     {
       key: 'noInventario',
-      header: 'No. Inventario',
+      header: 'No. Inv.',
       render: (row) =>
         row.copias.length > 1 ? (
           <Badge tone="primary" icon={Layers}>
             {row.copias.length} copias
           </Badge>
         ) : (
-          row.noInventario
+          row.noInventario || 'N/A'
         ),
     },
-    { key: 'categoria', header: 'Categoria', render: (row) => etiquetaDe(row.categoria) },
-    { key: 'titulo', header: 'Titulo' },
-    { key: 'autor', header: 'Autor' },
+    {
+      key: 'categoria',
+      header: 'Categoria',
+      render: (row) => {
+        const etiqueta = etiquetaDe(row.categoria);
+        return (
+          <span className="block max-w-[6rem] truncate" title={etiqueta}>
+            {etiqueta}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'titulo',
+      header: 'Titulo',
+      render: (row) => (
+        <span className="block max-w-[9rem] truncate" title={row.titulo}>
+          {row.titulo}
+        </span>
+      ),
+    },
+    {
+      key: 'autor',
+      header: 'Autor',
+      render: (row) => (
+        <span className="block max-w-[6rem] truncate" title={row.autor}>
+          {row.autor}
+        </span>
+      ),
+    },
     {
       key: 'estadoFisico',
       header: 'Estado fisico',
@@ -248,8 +415,8 @@ export default function CatalogListPage() {
       key: 'registradoPor',
       header: 'Registrado por',
       render: (row) => {
-        const nombres = new Set(row.copias.map((c) => c.registradoPor?.nombre || 'N/A'));
-        return nombres.size === 1 ? [...nombres][0] : 'Varios';
+        const claves = new Set(row.copias.map((c) => c.origenImportacion || c.registradoPor?.nombre || 'N/A'));
+        return claves.size === 1 ? <RegistradoPor item={row.copias[0]} /> : 'Varios';
       },
     },
     {
@@ -262,6 +429,11 @@ export default function CatalogListPage() {
         const item = row.copias[0];
         return (
           <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+            {!item.enviado ? (
+              <button onClick={() => enviarUno(item)} className="text-primary hover:text-primary-light" title="Enviar a revision">
+                <Send size={16} />
+              </button>
+            ) : null}
             {puedeEditar(item) ? (
               <Link to={`/catalogo/${item._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
                 <Pencil size={16} />
@@ -290,6 +462,7 @@ export default function CatalogListPage() {
           puedeEditar={puedeEditar}
           esManager={user?.rol === ROLES.MANAGER}
           onEliminar={setItemAEliminar}
+          onEnviar={enviarUno}
         />
       </div>
     );
@@ -301,9 +474,16 @@ export default function CatalogListPage() {
         <h1 className="text-xl font-semibold text-primary-dark">Catalogo</h1>
         <div className="flex gap-2">
           {user?.rol === ROLES.ADMIN || user?.rol === ROLES.MANAGER ? (
-            <Button variant="secondary" icon={FileDown} onClick={handleExportar} disabled={exportando}>
-              {exportando ? 'Generando...' : 'Exportar PDF'}
-            </Button>
+            <>
+              <Link to="/catalogo/importar">
+                <Button variant="secondary" icon={FileSpreadsheet}>
+                  Importar Excel
+                </Button>
+              </Link>
+              <Button variant="secondary" icon={FileDown} onClick={handleExportar} disabled={exportando}>
+                {exportando ? 'Generando...' : 'Exportar PDF'}
+              </Button>
+            </>
           ) : null}
           <Link to="/catalogo/nuevo">
             <Button icon={Plus}>Registrar material</Button>
@@ -370,6 +550,23 @@ export default function CatalogListPage() {
       </div>
 
       <AlertBanner>{error}</AlertBanner>
+      <AlertBanner type="success">{mensaje}</AlertBanner>
+
+      {seleccionados.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-primary-dark">
+            {seleccionados.size} borrador{seleccionados.size === 1 ? '' : 'es'} seleccionado{seleccionados.size === 1 ? '' : 's'}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setSeleccionados(new Set())}>
+              Cancelar seleccion
+            </Button>
+            <Button icon={Send} onClick={() => setLoteAbierto(true)}>
+              Enviar a revision
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <DataTable
         columns={columns}
@@ -399,6 +596,27 @@ export default function CatalogListPage() {
         <p className="text-sm text-slate-600">
           ¿Confirmas eliminar el registro <strong>{itemAEliminar?.titulo}</strong> (No. Inventario{' '}
           {itemAEliminar?.noInventario})? Esta accion quedara registrada en la auditoria.
+        </p>
+      </Modal>
+
+      <Modal
+        open={loteAbierto}
+        title="Enviar a revision"
+        onClose={() => setLoteAbierto(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLoteAbierto(false)}>
+              Cancelar
+            </Button>
+            <Button icon={Send} onClick={confirmarLote} disabled={enviando}>
+              {enviando ? 'Enviando...' : `Enviar ${seleccionados.size} registro(s)`}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          Vas a enviar <strong>{seleccionados.size}</strong> registro{seleccionados.size === 1 ? '' : 's'} a revision.
+          Dejaran de ser borrador y Admin/Manager podran verlos y aprobarlos.
         </p>
       </Modal>
     </div>

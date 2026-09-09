@@ -25,6 +25,7 @@ export const ESTADO_REVISION_LABELS = {
 export const ACCIONES_AUDITORIA = [
   'CREAR',
   'EDITAR',
+  'ENVIAR',
   'APROBAR',
   'RECHAZAR',
   'ELIMINAR',
@@ -39,6 +40,7 @@ export const ACCIONES_AUDITORIA = [
 export const ACCION_LABELS = {
   CREAR: 'Creo',
   EDITAR: 'Edito',
+  ENVIAR: 'Envio a revision',
   APROBAR: 'Aprobo',
   RECHAZAR: 'Rechazo',
   ELIMINAR: 'Elimino',
@@ -53,6 +55,7 @@ export const ACCION_LABELS = {
 export const ACCION_TONOS = {
   CREAR: 'primary',
   EDITAR: 'neutral',
+  ENVIAR: 'primary',
   APROBAR: 'success',
   RECHAZAR: 'danger',
   ELIMINAR: 'danger',

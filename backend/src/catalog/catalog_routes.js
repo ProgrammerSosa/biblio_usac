@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { verifyJWT, checkRole } = require('../../middlewares/auth');
 const { ROLES } = require('../../utils/constants');
 const {
@@ -6,21 +7,40 @@ const {
   listItems,
   getItem,
   updateOwnItem,
-  reviewByAdmin,
+  revisarMaterial,
   aprobarLote,
+  enviarLote,
+  previsualizarImportacion,
+  confirmarImportacion,
   deleteItem,
 } = require('./catalog_controller');
 
 const router = express.Router();
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const nombre = file.originalname.toLowerCase();
+    if (nombre.endsWith('.xlsx') || nombre.endsWith('.xls')) {
+      cb(null, true);
+    } else {
+      cb(new Error('El archivo debe ser un Excel (.xlsx o .xls)'));
+    }
+  },
+});
+
 router.use(verifyJWT);
 
 router.get('/', listItems);
 router.post('/', createItem);
-router.patch('/aprobar-lote', checkRole(ROLES.ADMIN), aprobarLote);
+router.patch('/aprobar-lote', checkRole(ROLES.ADMIN, ROLES.MANAGER), aprobarLote);
+router.patch('/enviar-lote', enviarLote);
+router.post('/importar', checkRole(ROLES.ADMIN, ROLES.MANAGER), upload.single('archivo'), previsualizarImportacion);
+router.post('/importar/confirmar', checkRole(ROLES.ADMIN, ROLES.MANAGER), confirmarImportacion);
 router.get('/:id', getItem);
 router.patch('/:id', updateOwnItem);
-router.patch('/:id/revisar', checkRole(ROLES.ADMIN), reviewByAdmin);
+router.patch('/:id/revisar', checkRole(ROLES.ADMIN, ROLES.MANAGER), revisarMaterial);
 router.delete('/:id', checkRole(ROLES.MANAGER), deleteItem);
 
 module.exports = router;

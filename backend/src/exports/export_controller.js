@@ -4,6 +4,7 @@ const Category = require('../catalog/category_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants');
 const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
+const { escapeRegExp } = require('../../helpers/regex');
 const { fail } = require('../../utils/httpResponse');
 
 const ESTADO_LABELS = {
@@ -61,11 +62,15 @@ function agruparPorCategoria(registros) {
 
 async function exportCatalogPdf(req, res, next) {
   try {
-    const { estadoRevision, categoria } = req.query;
+    const { estadoRevision, categoria, buscar } = req.query;
 
     const filtro = { eliminado: false };
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
     if (categoria) filtro.categoria = categoria;
+    if (buscar && buscar.trim()) {
+      const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
+      filtro.$or = [{ titulo: patron }, { autor: patron }, { noInventario: patron }];
+    }
 
     const registros = await Catalog.find(filtro).sort({ categoria: 1, titulo: 1 });
 
@@ -103,7 +108,7 @@ async function exportCatalogPdf(req, res, next) {
       .text(
         `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoria || 'todas'}, estado=${
           estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
-        }  |  Total: ${registros.length}`
+        }${buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''}  |  Total: ${registros.length}`
       );
     doc.moveDown(1);
 

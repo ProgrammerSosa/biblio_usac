@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, ClipboardCheck, ListChecks } from 'lucide-react';
+import { CheckCircle2, XCircle, ClipboardCheck, ListChecks, Pencil, FileSpreadsheet } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { catalogApi } from '../catalog/catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -19,6 +20,25 @@ const TABS = [
   { value: ESTADOS_REVISION.PENDIENTE, label: 'Pendientes' },
   { value: ESTADOS_REVISION.APROBADO, label: 'Aprobados' },
 ];
+
+function RegistradoPor({ item }) {
+  if (item.origenImportacion) {
+    return (
+      <span
+        className="inline-flex max-w-[6rem] items-center gap-1 text-slate-600"
+        title={`Importado de ${item.origenImportacion}`}
+      >
+        <FileSpreadsheet size={13} className="shrink-0 text-primary" />
+        <span className="truncate">{item.origenImportacion}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="block max-w-[6rem] truncate" title={item.registradoPor?.nombre}>
+      {item.registradoPor?.nombre || 'N/A'}
+    </span>
+  );
+}
 
 export default function ApprovalsPage() {
   const { user } = useAuth();
@@ -40,8 +60,17 @@ export default function ApprovalsPage() {
   const [aprobandoLote, setAprobandoLote] = useState(false);
   const [errorLote, setErrorLote] = useState('');
 
-  const esAdmin = user?.rol === ROLES.ADMIN;
-  const puedeActuar = esAdmin && activeTab === ESTADOS_REVISION.PENDIENTE;
+  const puedeAprobar = [ROLES.ADMIN, ROLES.MANAGER].includes(user?.rol);
+  const puedeActuar = puedeAprobar && activeTab === ESTADOS_REVISION.PENDIENTE;
+
+  function filaColor(row) {
+    if (row.estadoRevision === ESTADOS_REVISION.APROBADO) return 'bg-emerald-50';
+    if (row.estadoRevision === ESTADOS_REVISION.PENDIENTE) {
+      const yaEditado = row.updatedAt && row.createdAt && row.updatedAt !== row.createdAt;
+      return yaEditado ? 'bg-amber-50' : 'bg-red-50';
+    }
+    return '';
+  }
 
   async function cargar() {
     setLoading(true);
@@ -149,33 +178,58 @@ export default function ApprovalsPage() {
           },
         ]
       : []),
-    { key: 'noInventario', header: 'No. Inventario' },
-    { key: 'categoria', header: 'Categoria', render: (row) => etiquetaDe(row.categoria) },
-    { key: 'titulo', header: 'Titulo' },
-    { key: 'autor', header: 'Autor' },
+    { key: 'noInventario', header: 'No. Inv.', render: (row) => row.noInventario || 'N/A' },
+    {
+      key: 'categoria',
+      header: 'Categoria',
+      render: (row) => {
+        const etiqueta = etiquetaDe(row.categoria);
+        return (
+          <span className="block max-w-[6rem] truncate" title={etiqueta}>
+            {etiqueta}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'titulo',
+      header: 'Titulo',
+      render: (row) => (
+        <span className="block max-w-[9rem] truncate" title={row.titulo}>
+          {row.titulo}
+        </span>
+      ),
+    },
+    {
+      key: 'autor',
+      header: 'Autor',
+      render: (row) => (
+        <span className="block max-w-[6rem] truncate" title={row.autor}>
+          {row.autor}
+        </span>
+      ),
+    },
     {
       key: 'estadoFisico',
       header: 'Estado fisico',
       render: (row) =>
         tieneDanoFisico(row.estadoFisico) ? <Badge tone="danger">{row.estadoFisico}</Badge> : row.estadoFisico || 'N/A',
     },
-    { key: 'registradoPor', header: 'Registrado por', render: (row) => row.registradoPor?.nombre || 'N/A' },
+    { key: 'registradoPor', header: 'Registrado por', render: (row) => <RegistradoPor item={row} /> },
     ...(puedeActuar
       ? [
           {
             key: 'acciones',
             header: 'Acciones',
             render: (row) => (
-              <Button
-                variant="secondary"
-                icon={ClipboardCheck}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  abrirRevision(row);
-                }}
-              >
-                Revisar
-              </Button>
+              <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <Link to={`/catalogo/${row._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
+                  <Pencil size={16} />
+                </Link>
+                <Button variant="secondary" icon={ClipboardCheck} onClick={() => abrirRevision(row)}>
+                  Revisar
+                </Button>
+              </div>
             ),
           },
         ]
@@ -185,12 +239,6 @@ export default function ApprovalsPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Aprobaciones</h1>
-      {!esAdmin ? (
-        <p className="text-sm text-slate-500">
-          Solo el Admin aprueba materiales. Aqui puedes ver el estado de la cola de revision; si algo esta mal puedes
-          corregirlo directamente desde el Catalogo.
-        </p>
-      ) : null}
 
       <Tabs
         tabs={TABS}
@@ -221,6 +269,18 @@ export default function ApprovalsPage() {
         </div>
       ) : null}
 
+      <div className="flex items-center gap-4 text-xs text-slate-500">
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-red-50 ring-1 ring-inset ring-red-200" /> Pendiente, sin revisar
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-inset ring-amber-200" /> Pendiente, ya editado
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-inset ring-emerald-200" /> Aprobado
+        </span>
+      </div>
+
       <DataTable
         columns={columns}
         rows={registros}
@@ -228,6 +288,7 @@ export default function ApprovalsPage() {
         loading={loading}
         emptyMessage="No hay registros en este filtro"
         renderExpanded={(row) => <CatalogDetailFields item={row} />}
+        rowClassName={filaColor}
       />
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
 
