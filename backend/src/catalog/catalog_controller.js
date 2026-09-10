@@ -4,7 +4,7 @@ const User = require('../users/user_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
 const { escapeRegExp } = require('../../helpers/regex');
-const { previsualizarWorkbook } = require('../../helpers/excelImport');
+const { previsualizarWorkbook, normalizarTexto, MARCADORES_SIN_DATO } = require('../../helpers/excelImport');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
 const CAMPOS_EDITABLES = [
@@ -29,13 +29,13 @@ function pickCatalogFields(body) {
     }
   }
 
-  // "" no es lo mismo que ausente para el indice unique+sparse: Mongo solo salta el indice
-  // cuando el campo no existe en el documento, no cuando vale "". Sin esto, el primer registro
-  // sin numero de inventario se guarda bien, pero el segundo choca contra el primero como si
-  // fuera un No. de Inventario duplicado (los dos valen "").
+  // "" (o un marcador como "N/A") no es lo mismo que ausente para el indice unique+sparse:
+  // Mongo solo salta el indice cuando el campo no existe en el documento, no cuando vale "" o
+  // "N/A". Sin esto, el primer registro sin numero de inventario se guarda bien, pero el
+  // segundo choca contra el primero como si fuera un No. de Inventario duplicado.
   if (typeof datos.noInventario === 'string') {
     const limpio = datos.noInventario.trim();
-    datos.noInventario = limpio || undefined;
+    datos.noInventario = limpio && !MARCADORES_SIN_DATO.has(normalizarTexto(limpio)) ? limpio : undefined;
   }
 
   return datos;
@@ -348,10 +348,27 @@ async function confirmarImportacion(req, res, next) {
       return fail(res, 'No hay materiales para importar');
     }
 
+    // Un Auxiliar solo puede registrar (a mano o por Excel) en sus categorias asignadas -
+    // misma regla que createItem, para que importar un Excel no sea una forma de saltarsela.
+    let categoriasPermitidas = null;
+    if (req.user.rol === ROLES.USER) {
+      const usuario = await User.findById(req.user.userId);
+      categoriasPermitidas = usuario.allowedCategories;
+    }
+
     let creados = 0;
     const errores = [];
 
     for (const item of items) {
+      if (categoriasPermitidas && !categoriasPermitidas.includes(item.categoria)) {
+        errores.push({
+          titulo: item.titulo,
+          noInventario: item.noInventario,
+          error: `No tienes permiso para registrar materiales de la categoria ${item.categoria}`,
+        });
+        continue;
+      }
+
       const copias = Math.max(1, parseInt(item.copias, 10) || 1);
       // Si varias filas del Excel se fusionaron en este item por ser el mismo material
       // (100% igual salvo estado fisico), cada una pudo traer su propio No. de Inventario:
@@ -439,4 +456,5 @@ module.exports = {
   previsualizarImportacion,
   confirmarImportacion,
   deleteItem,
+  filtroVisibilidadBorradores,
 };

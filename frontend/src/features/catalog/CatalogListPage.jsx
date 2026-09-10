@@ -20,13 +20,14 @@ const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'dan
 
 function RegistradoPor({ item }) {
   if (item.origenImportacion) {
+    const nombre = item.registradoPor?.nombre || 'N/A';
     return (
-      <span
-        className="inline-flex max-w-[6rem] items-center gap-1 text-slate-600"
-        title={`Importado de ${item.origenImportacion}`}
-      >
-        <FileSpreadsheet size={13} className="shrink-0 text-primary" />
-        <span className="truncate">{item.origenImportacion}</span>
+      <span className="flex max-w-[6rem] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
+        <span className="inline-flex items-center gap-1 text-slate-600">
+          <FileSpreadsheet size={13} className="shrink-0 text-primary" />
+          <span className="truncate">{item.origenImportacion}</span>
+        </span>
+        <span className="truncate text-[11px] text-slate-400">{nombre}</span>
       </span>
     );
   }
@@ -43,7 +44,7 @@ function normalizarParaComparar(valor) {
   // distintas, acentos puestos o no ("Garcia" vs "García"). Se normaliza antes de comparar
   // para que esas diferencias menores no partan en dos lo que en realidad es la misma obra.
   // Misma regla que usa el import de Excel (excelImport.js) para que ambos coincidan.
-  return (valor || '')
+  return String(valor ?? '')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .trim()
@@ -51,10 +52,17 @@ function normalizarParaComparar(valor) {
     .replace(/\s+/g, ' ');
 }
 
+// Dos registros son "copias" del mismo material si TODO coincide - categoria, autor, titulo,
+// idioma, anio, edicion, lugar, paginas y los atributos propios de la categoria (editorial,
+// ISBN, etc.) - excepto el estado fisico y el No. de Inventario, los dos unicos datos que de
+// verdad cambian entre copias fisicas del mismo libro.
 function claveDeGrupo(item) {
-  return [item.categoria, item.autor, item.titulo, item.edicion, item.idioma]
-    .map(normalizarParaComparar)
-    .join('|');
+  const camposBase = [item.categoria, item.autor, item.titulo, item.idioma, item.anio, item.edicion, item.lugar, item.paginasImpresas];
+  const atributos = item.atributos || {};
+  const atributosOrdenados = Object.keys(atributos)
+    .sort()
+    .map((clave) => `${clave}:${atributos[clave]}`);
+  return [...camposBase, ...atributosOrdenados].map(normalizarParaComparar).join('|');
 }
 
 function agruparRegistros(registros) {
@@ -137,7 +145,9 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
                     {copia.estadoFisico}
                   </Badge>
                 ) : (
-                  <span className="text-slate-500">{copia.estadoFisico || 'N/A'}</span>
+                  <span className="block max-w-[14rem] truncate text-slate-500" title={copia.estadoFisico}>
+                    {copia.estadoFisico || 'N/A'}
+                  </span>
                 )}
               </td>
               <td className="px-3 py-2">
@@ -201,7 +211,7 @@ export default function CatalogListPage() {
     setLoading(true);
     setError('');
     try {
-      const params = { page, limit: 10 };
+      const params = { page, limit: 15 };
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
       if (soloMios) params.registradoPor = user?.id;
@@ -244,15 +254,19 @@ export default function CatalogListPage() {
     }
   }
 
-  async function enviarUno(item) {
+  async function enviarVarios(items) {
     setError('');
     try {
-      await catalogApi.enviarLote([item._id]);
-      setMensaje('Registro enviado a revision');
+      const res = await catalogApi.enviarLote(items.map((i) => i._id));
+      setMensaje(`${res.data.data.enviados} registro(s) enviado(s) a revision`);
       await cargar();
     } catch (err) {
       setError(getErrorMessage(err, 'No se pudo enviar el registro'));
     }
+  }
+
+  function enviarUno(item) {
+    return enviarVarios([item]);
   }
 
   async function confirmarLote() {
@@ -294,6 +308,7 @@ export default function CatalogListPage() {
       const params = {};
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
+      if (soloMios) params.registradoPor = user?.id;
       if (buscar.trim()) params.buscar = buscar.trim();
       const res = await catalogApi.exportPdf(params);
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
@@ -407,7 +422,12 @@ export default function CatalogListPage() {
             </Badge>
           );
         }
-        return <span className="text-slate-500">{row.copias[0].estadoFisico || 'N/A'}</span>;
+        const texto = row.copias[0].estadoFisico || 'N/A';
+        return (
+          <span className="block max-w-[8rem] truncate text-slate-500" title={texto}>
+            {texto}
+          </span>
+        );
       },
     },
     { key: 'estadoRevision', header: 'Estado', render: (row) => <ResumenEstadoRevision copias={row.copias} /> },
@@ -424,7 +444,21 @@ export default function CatalogListPage() {
       header: 'Acciones',
       render: (row) => {
         if (row.copias.length > 1) {
-          return <span className="text-xs text-slate-400">Ver copias</span>;
+          const pendientes = row.copias.filter((c) => !c.enviado);
+          return (
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-slate-400">Ver copias</span>
+              {pendientes.length > 0 ? (
+                <button
+                  onClick={() => enviarVarios(pendientes)}
+                  className="text-primary hover:text-primary-light"
+                  title={`Enviar ${pendientes.length} a revision`}
+                >
+                  <Send size={16} />
+                </button>
+              ) : null}
+            </div>
+          );
         }
         const item = row.copias[0];
         return (
@@ -473,18 +507,14 @@ export default function CatalogListPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-primary-dark">Catalogo</h1>
         <div className="flex gap-2">
-          {user?.rol === ROLES.ADMIN || user?.rol === ROLES.MANAGER ? (
-            <>
-              <Link to="/catalogo/importar">
-                <Button variant="secondary" icon={FileSpreadsheet}>
-                  Importar Excel
-                </Button>
-              </Link>
-              <Button variant="secondary" icon={FileDown} onClick={handleExportar} disabled={exportando}>
-                {exportando ? 'Generando...' : 'Exportar PDF'}
-              </Button>
-            </>
-          ) : null}
+          <Link to="/catalogo/importar">
+            <Button variant="secondary" icon={FileSpreadsheet}>
+              Importar Excel
+            </Button>
+          </Link>
+          <Button variant="secondary" icon={FileDown} onClick={handleExportar} disabled={exportando}>
+            {exportando ? 'Generando...' : 'Exportar PDF'}
+          </Button>
           <Link to="/catalogo/nuevo">
             <Button icon={Plus}>Registrar material</Button>
           </Link>

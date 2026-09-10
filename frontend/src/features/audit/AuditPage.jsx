@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { auditApi } from './auditApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
-import { ACCIONES_AUDITORIA, ACCION_LABELS, ACCION_TONOS, ROL_LABELS } from '../../shared/constants';
+import { useAuth } from '../../shared/hooks/useAuth';
+import { ACCIONES_AUDITORIA, ACCION_LABELS, ACCION_TONOS, ROL_LABELS, ROLES } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
 import Tabs from '../../shared/components/Tabs';
@@ -26,6 +27,8 @@ function resumenDetalles(detalles) {
 }
 
 export default function AuditPage() {
+  const { user } = useAuth();
+  const esAuxiliar = user?.rol === ROLES.USER;
   const [activeTab, setActiveTab] = useState('reciente');
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
@@ -55,10 +58,12 @@ export default function AuditPage() {
   }
 
   useEffect(() => {
+    if (esAuxiliar) return; // solo ve lo suyo, no tiene sentido pedir la lista de personal
     auditApi
       .listUsuarios()
       .then((res) => setUsuariosFiltrables(res.data.data))
       .catch(() => setUsuariosFiltrables([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -81,6 +86,7 @@ export default function AuditPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Auditoria</h1>
+      {esAuxiliar ? <p className="text-sm text-slate-500">Tu historial de acciones - lo que has creado, editado o enviado a revision.</p> : null}
 
       <Tabs
         tabs={TABS}
@@ -98,21 +104,23 @@ export default function AuditPage() {
       ) : null}
 
       <div className="flex gap-3">
-        <Select
-          value={usuario}
-          onChange={(e) => {
-            setPage(1);
-            setUsuario(e.target.value);
-          }}
-          className="max-w-xs"
-        >
-          <option value="">Todo el personal a mi alcance</option>
-          {usuariosFiltrables.map((u) => (
-            <option key={u._id} value={u._id}>
-              {u.nombre} ({ROL_LABELS[u.rol]})
-            </option>
-          ))}
-        </Select>
+        {esAuxiliar ? null : (
+          <Select
+            value={usuario}
+            onChange={(e) => {
+              setPage(1);
+              setUsuario(e.target.value);
+            }}
+            className="max-w-xs"
+          >
+            <option value="">Todo el personal a mi alcance</option>
+            {usuariosFiltrables.map((u) => (
+              <option key={u._id} value={u._id}>
+                {u.nombre} ({ROL_LABELS[u.rol]})
+              </option>
+            ))}
+          </Select>
+        )}
         <Select
           value={accion}
           onChange={(e) => {

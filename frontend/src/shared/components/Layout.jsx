@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { to: '/catalogo', label: 'Catalogo', icon: BookOpen, roles: ['MANAGER', 'ADMIN', 'USER'] },
   { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare, roles: ['MANAGER', 'ADMIN'] },
   { to: '/equipo', label: 'Equipo', icon: Activity, roles: ['MANAGER', 'ADMIN'] },
-  { to: '/auditoria', label: 'Auditoria', icon: ShieldCheck, roles: ['MANAGER', 'ADMIN'] },
+  { to: '/auditoria', label: 'Auditoria', icon: ShieldCheck, roles: ['MANAGER', 'ADMIN', 'USER'] },
   { to: '/categorias', label: 'Categorias', icon: Tags, roles: ['MANAGER'] },
   { to: '/personal', label: 'Personal', icon: Users, roles: ['MANAGER'] },
 ];

@@ -80,14 +80,14 @@ async function construirExcelDePrueba() {
 }
 
 describe('POST /api/catalog/importar (previsualizar)', () => {
-  test('un Auxiliar no puede importar', async () => {
+  test('un Auxiliar tambien puede previsualizar un Excel (no es exclusivo de Admin/Manager)', async () => {
     const buffer = await construirExcelDePrueba();
     const res = await api(app)
       .post('/api/catalog/importar')
       .set('Authorization', `Bearer ${auxiliarToken}`)
       .attach('archivo', buffer, 'prueba.xlsx');
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 
   test('responde 400 si no se sube ningun archivo', async () => {
@@ -148,6 +148,99 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
     expect(hojaLibros.camposDesconocidos).not.toContain('copias');
   });
 
+  test('si difieren en un campo que no sea estado fisico o No. de Inventario, NO son copias', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Idioma', 'Año', 'Edicion', 'Editorial', 'Lugar', 'ISBN', 'Tipo de documento', 'Paginas impresas']);
+    // Mismo autor+titulo+edicion+idioma que antes bastaba para agrupar, pero el Año cambia -
+    // son ediciones/impresiones distintas del mismo libro, no la misma copia fisica.
+    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Espanol', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
+    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Espanol', 2021, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    const items = res.body.data.hojas[0].items;
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.copias === 1)).toBe(true);
+  });
+
+  test('un No. de Inventario escrito como "N/A" (o variantes) se trata como ausente, no como un valor real', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento', 'No. De Inventario']);
+    hoja.addRow(['Autor Uno', 'Libro Uno Sin Inventario Real', 'Ed', '1', 'Fisico', 'N/A']);
+    hoja.addRow(['Autor Dos', 'Libro Dos Sin Inventario Real', 'Ed', '2', 'Fisico', 'n/a']);
+    hoja.addRow(['Autor Tres', 'Libro Tres Sin Inventario Real', 'Ed', '3', 'Fisico', 'S/N']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const previsualizar = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(previsualizar.status).toBe(200);
+    const items = previsualizar.body.data.hojas[0].items;
+    expect(items.every((i) => !i.noInventario)).toBe(true);
+
+    // Lo que de verdad importaba: que las 3 filas -todas "sin numero"- se puedan confirmar
+    // juntas sin que la 2a y 3a choquen contra la 1a como si "N/A" fuera un numero repetido.
+    const confirmar = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ items, archivoOrigen: 'prueba.xlsx' });
+
+    expect(confirmar.body.data.creados).toBe(3);
+    expect(confirmar.body.data.errores).toHaveLength(0);
+  });
+
+  test('una celda con texto de formato mixto (rich text) se lee como texto plano, no como objeto', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'Lugar', 'ISBN', 'Tipo de documento', 'Estado fisico']);
+    const fila = hoja.addRow([null, null, null, null, '978-1', 'Fisico', null]);
+    // Asi guarda ExcelJS una celda donde una palabra esta en un color/formato distinto al
+    // resto del texto (ej. copiado y pegado de otro documento) - varios "runs" en vez de un
+    // solo texto plano. Es justo lo que trajo el Excel real que reporto el error.
+    fila.getCell(1).value = { richText: [{ font: {}, text: 'Poder Judicial ' }, { font: { bold: true }, text: 'de la Nacion' }] };
+    fila.getCell(2).value = { richText: [{ font: {}, text: 'Manual de Derecho ' }, { font: { bold: true }, text: 'Venezolano' }] };
+    fila.getCell(3).value = { richText: [{ font: {}, text: 'Ofgloma, S.A. ' }, { font: {}, text: 'de C.V.' }] };
+    fila.getCell(4).value = { richText: [{ font: {}, text: 'Estados Unidos,' }, { font: {}, text: ' Chicago' }] };
+    fila.getCell(7).value = { richText: [{ font: {}, text: 'Buen estado' }, { font: {}, text: ' Es copia' }] };
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const previsualizar = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(previsualizar.status).toBe(200);
+    const item = previsualizar.body.data.hojas[0].items[0];
+    expect(item.autor).toBe('Poder Judicial de la Nacion');
+    expect(item.titulo).toBe('Manual de Derecho Venezolano');
+    expect(item.lugar).toBe('Estados Unidos, Chicago');
+    expect(item.estadoFisico).toBe('Buen estado Es copia');
+    expect(item.atributos.EDITORIAL).toBe('Ofgloma, S.A. de C.V.');
+
+    // Y que de verdad se pueda guardar (antes esto tumbaba la fila con un CastError, o peor,
+    // guardaba el texto literal "[object Object]").
+    const confirmar = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ items: [item], archivoOrigen: 'prueba.xlsx' });
+
+    expect(confirmar.body.data.creados).toBe(1);
+    expect(confirmar.body.data.errores).toHaveLength(0);
+
+    const guardado = await Catalog.findOne({ titulo: 'Manual de Derecho Venezolano' });
+    expect(guardado.autor).toBe('Poder Judicial de la Nacion');
+    expect(guardado.atributos.EDITORIAL).toBe('Ofgloma, S.A. de C.V.');
+  });
+
   test('una fila con titulo pero sin autor si queda invalida (eso no se rellena con N/A)', async () => {
     const workbook = new ExcelJS.Workbook();
     const hoja = workbook.addWorksheet('Libros');
@@ -202,13 +295,38 @@ describe('POST /api/catalog/importar/confirmar', () => {
     };
   }
 
-  test('un Auxiliar no puede confirmar una importacion', async () => {
+  test('un Auxiliar puede confirmar una importacion en su categoria permitida', async () => {
     const res = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${auxiliarToken}`)
-      .send({ items: [itemValido()] });
+      .send({ items: [itemValido()] }); // itemValido() es categoria LIBRO, y el auxiliar de prueba tiene allowedCategories: ['LIBRO']
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.data.creados).toBe(1);
+
+    const registro = await Catalog.findOne({ noInventario: 'IMP-CONF-1' });
+    expect(registro.registradoPor.toString()).toBe(auxiliar._id.toString());
+  });
+
+  test('un Auxiliar NO puede confirmar una importacion en una categoria que no le asignaron', async () => {
+    const res = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${auxiliarToken}`)
+      .send({
+        items: [
+          itemValido(), // LIBRO: si permitido
+          itemValido({ categoria: 'REVISTA', noInventario: 'IMP-CONF-REV', titulo: 'Revista No Permitida', atributos: { EDITORIAL: 'E', ISSN: '1', VOLUMEN: '1' } }),
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.creados).toBe(1);
+    expect(res.body.data.errores).toHaveLength(1);
+    expect(res.body.data.errores[0].titulo).toBe('Revista No Permitida');
+    expect(res.body.data.errores[0].error).toMatch(/no tienes permiso/i);
+
+    expect(await Catalog.findOne({ noInventario: 'IMP-CONF-1' })).not.toBeNull();
+    expect(await Catalog.findOne({ noInventario: 'IMP-CONF-REV' })).toBeNull();
   });
 
   test('rechaza la peticion si no hay items', async () => {

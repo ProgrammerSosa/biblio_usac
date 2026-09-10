@@ -23,13 +23,14 @@ const TABS = [
 
 function RegistradoPor({ item }) {
   if (item.origenImportacion) {
+    const nombre = item.registradoPor?.nombre || 'N/A';
     return (
-      <span
-        className="inline-flex max-w-[6rem] items-center gap-1 text-slate-600"
-        title={`Importado de ${item.origenImportacion}`}
-      >
-        <FileSpreadsheet size={13} className="shrink-0 text-primary" />
-        <span className="truncate">{item.origenImportacion}</span>
+      <span className="flex max-w-[6rem] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
+        <span className="inline-flex items-center gap-1 text-slate-600">
+          <FileSpreadsheet size={13} className="shrink-0 text-primary" />
+          <span className="truncate">{item.origenImportacion}</span>
+        </span>
+        <span className="truncate text-[11px] text-slate-400">{nombre}</span>
       </span>
     );
   }
@@ -76,7 +77,7 @@ export default function ApprovalsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await catalogApi.list({ estadoRevision: activeTab, page, limit: 10 });
+      const res = await catalogApi.list({ estadoRevision: activeTab, page, limit: 15 });
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
     } catch (err) {
@@ -213,7 +214,13 @@ export default function ApprovalsPage() {
       key: 'estadoFisico',
       header: 'Estado fisico',
       render: (row) =>
-        tieneDanoFisico(row.estadoFisico) ? <Badge tone="danger">{row.estadoFisico}</Badge> : row.estadoFisico || 'N/A',
+        tieneDanoFisico(row.estadoFisico) ? (
+          <Badge tone="danger">{row.estadoFisico}</Badge>
+        ) : (
+          <span className="block max-w-[8rem] truncate" title={row.estadoFisico}>
+            {row.estadoFisico || 'N/A'}
+          </span>
+        ),
     },
     { key: 'registradoPor', header: 'Registrado por', render: (row) => <RegistradoPor item={row} /> },
     ...(puedeActuar

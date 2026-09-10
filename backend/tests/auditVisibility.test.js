@@ -15,6 +15,7 @@ let admin;
 let auxiliar;
 let managerToken;
 let adminToken;
+let auxiliarToken;
 
 beforeAll(async () => {
   await connect();
@@ -29,6 +30,7 @@ beforeEach(async () => {
 
   managerToken = generateJWT(manager);
   adminToken = generateJWT(admin);
+  auxiliarToken = generateJWT(auxiliar);
 
   const entidadId = new mongoose.Types.ObjectId();
   await registrarAuditoria({ accion: ACCIONES_AUDITORIA.CREAR, entidad: 'Catalog', entidadId, usuario: auxiliar._id });
@@ -83,5 +85,32 @@ describe('Visibilidad de auditoria por rol', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(3);
+  });
+
+  test('Auxiliar tambien puede entrar, pero solo ve sus propias acciones', async () => {
+    const res = await api(app).get('/api/audit').set('Authorization', `Bearer ${auxiliarToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.registros[0].accion).toBe(ACCIONES_AUDITORIA.CREAR);
+    expect(res.body.data.registros[0].usuario.rol).toBe(ROLES.USER);
+  });
+
+  test('Auxiliar no puede ver la auditoria de alguien mas aunque lo pida por la URL', async () => {
+    const res = await api(app)
+      .get(`/api/audit?usuario=${admin._id}`)
+      .set('Authorization', `Bearer ${auxiliarToken}`);
+
+    expect(res.status).toBe(200);
+    // Se ignora el ?usuario= ajeno: sigue viendo solo lo suyo (1), no lo del Admin.
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.registros[0].usuario.rol).toBe(ROLES.USER);
+  });
+
+  test('GET /api/audit/usuarios: Auxiliar no recibe la lista de personal', async () => {
+    const res = await api(app).get('/api/audit/usuarios').set('Authorization', `Bearer ${auxiliarToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
   });
 });

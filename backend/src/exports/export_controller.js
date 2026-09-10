@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
 const Catalog = require('../catalog/catalog_model');
 const Category = require('../catalog/category_model');
+const { filtroVisibilidadBorradores } = require('../catalog/catalog_controller');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants');
 const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
@@ -62,17 +63,24 @@ function agruparPorCategoria(registros) {
 
 async function exportCatalogPdf(req, res, next) {
   try {
-    const { estadoRevision, categoria, buscar } = req.query;
+    const { estadoRevision, categoria, buscar, registradoPor } = req.query;
 
     const filtro = { eliminado: false };
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
     if (categoria) filtro.categoria = categoria;
+    if (registradoPor) filtro.registradoPor = registradoPor;
+
+    // Cualquier rol puede exportar (antes solo Admin/Manager), asi que el export tiene que
+    // respetar la misma regla de visibilidad de borradores que la lista: un borrador sin
+    // enviar solo lo ve quien lo creo, nunca deberia colarse en el PDF de alguien mas.
+    const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
     if (buscar && buscar.trim()) {
       const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
-      filtro.$or = [{ titulo: patron }, { autor: patron }, { noInventario: patron }];
+      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { noInventario: patron }] });
     }
+    const filtroFinal = { $and: clausulas };
 
-    const registros = await Catalog.find(filtro).sort({ categoria: 1, titulo: 1 });
+    const registros = await Catalog.find(filtroFinal).sort({ categoria: 1, titulo: 1 });
 
     if (registros.length === 0) {
       return fail(res, 'No hay registros que coincidan con los filtros indicados', 404);

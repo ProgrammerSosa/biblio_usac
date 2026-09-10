@@ -8,8 +8,8 @@ const { ROLES } = require('../utils/constants');
 const { hashPassword } = require('../helpers/password');
 const { generarClave } = require('../helpers/slug');
 
-const DEFAULT_MANAGER_NOMBRE = process.env.DEFAULT_MANAGER_NOMBRE || 'adminbiblio';
-const DEFAULT_MANAGER_EMAIL = process.env.DEFAULT_MANAGER_EMAIL || 'adminbiblio@bibliotecausac.gt';
+const DEFAULT_MANAGER_NOMBRE = process.env.DEFAULT_MANAGER_NOMBRE || 'libroderecho';
+const DEFAULT_MANAGER_EMAIL = process.env.DEFAULT_MANAGER_EMAIL || 'l@wbook';
 const DEFAULT_MANAGER_PASSWORD = process.env.DEFAULT_MANAGER_PASSWORD || '@dmin123';
 
 // clave de cada campo se genera igual que cuando la Manager crea una categoria desde la app,

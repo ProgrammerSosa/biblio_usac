@@ -40,10 +40,97 @@ async function crearUsuarioConToken(rol) {
 }
 
 describe('Exportacion de catalogo a PDF', () => {
-  test('USER no puede exportar', async () => {
+  test('cualquier rol autenticado puede exportar (no solo Admin/Manager)', async () => {
+    const userToken = await crearUsuarioConToken(ROLES.USER);
+    const user = await User.findOne({ rol: ROLES.USER });
+
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-USER',
+      autor: 'Autor de Prueba',
+      titulo: 'Titulo de Prueba',
+      atributos: { EDITORIAL: 'Editorial USAC', ISBN: '978-0-00-000000-0', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      enviado: true,
+      registradoPor: user._id,
+    });
+
+    const res = await api(app).get('/api/exports/catalog').set('Authorization', `Bearer ${userToken}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('sin registros visibles, responde 404 en vez de la lista vacia de siempre', async () => {
     const userToken = await crearUsuarioConToken(ROLES.USER);
     const res = await api(app).get('/api/exports/catalog').set('Authorization', `Bearer ${userToken}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
+  });
+
+  test('un borrador sin enviar de otra persona no se cuela en el PDF de nadie mas (ni Admin/Manager)', async () => {
+    const managerToken = await crearUsuarioConToken(ROLES.MANAGER);
+    const auxToken = await crearUsuarioConToken(ROLES.USER);
+    const auxiliar = await User.findOne({ rol: ROLES.USER });
+
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-BORRADOR',
+      autor: 'Autor Borrador',
+      titulo: 'Titulo Borrador Privado',
+      atributos: { EDITORIAL: 'Editorial USAC', ISBN: '999', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'PENDIENTE',
+      enviado: false,
+      registradoPor: auxiliar._id,
+    });
+
+    // El Manager exporta "todo" - el borrador ajeno no deberia aparecer, asi que no hay nada
+    // que coincida y responde 404, igual que si el catalogo estuviera vacio.
+    const comoManager = await api(app).get('/api/exports/catalog').set('Authorization', `Bearer ${managerToken}`);
+    expect(comoManager.status).toBe(404);
+
+    // El propio autor si lo puede exportar (su propio borrador, aunque no lo haya enviado).
+    const comoAutor = await api(app).get('/api/exports/catalog').set('Authorization', `Bearer ${auxToken}`);
+    expect(comoAutor.status).toBe(200);
+  });
+
+  test('el filtro registradoPor (checkbox "solo mis registros") tambien aplica al exportar', async () => {
+    const managerToken = await crearUsuarioConToken(ROLES.MANAGER);
+    const manager = await User.findOne({ rol: ROLES.MANAGER });
+    const otro = await User.create({
+      nombre: 'Otro Admin',
+      email: 'otroadmin@usac.gt',
+      passwordHash: await hashPassword('claveSegura123'),
+      rol: ROLES.ADMIN,
+    });
+
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-MIO',
+      autor: 'A',
+      titulo: 'Mio',
+      atributos: { EDITORIAL: 'E', ISBN: '1', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      enviado: true,
+      registradoPor: manager._id,
+    });
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-EXP-AJENO',
+      autor: 'B',
+      titulo: 'Ajeno',
+      atributos: { EDITORIAL: 'E', ISBN: '2', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      enviado: true,
+      registradoPor: otro._id,
+    });
+
+    const soloMios = await api(app)
+      .get(`/api/exports/catalog?registradoPor=${manager._id}`)
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(soloMios.status).toBe(200);
+
+    const soloDelOtro = await api(app)
+      .get(`/api/exports/catalog?registradoPor=${manager._id}&buscar=Ajeno`)
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(soloDelOtro.status).toBe(404);
   });
 
   test('Manager puede exportar el catalogo aprobado a PDF y queda auditado', async () => {
@@ -61,6 +148,7 @@ describe('Exportacion de catalogo a PDF', () => {
         TIPO_DE_DOCUMENTO: 'Fisico',
       },
       estadoRevision: 'APROBADO',
+      enviado: true,
       registradoPor: manager._id,
     });
 
@@ -101,6 +189,7 @@ describe('Exportacion de catalogo a PDF', () => {
       titulo: 'Un titulo que no coincide',
       atributos: { EDITORIAL: 'Editorial USAC', ISBN: '000', TIPO_DE_DOCUMENTO: 'Fisico' },
       estadoRevision: 'APROBADO',
+      enviado: true,
       registradoPor: manager._id,
     });
     await Catalog.create({
@@ -110,6 +199,7 @@ describe('Exportacion de catalogo a PDF', () => {
       titulo: 'Titulo Cualquiera',
       atributos: { EDITORIAL: 'Editorial USAC', ISBN: '111', TIPO_DE_DOCUMENTO: 'Fisico' },
       estadoRevision: 'APROBADO',
+      enviado: true,
       registradoPor: manager._id,
     });
 

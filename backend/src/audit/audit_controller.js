@@ -18,7 +18,11 @@ async function listAudit(req, res, next) {
       if (hasta) filtro.fecha.$lte = new Date(hasta);
     }
 
-    if (req.user.rol === ROLES.ADMIN) {
+    if (req.user.rol === ROLES.USER) {
+      // Un Auxiliar solo ve su propia auditoria, sin excepcion - se ignora cualquier
+      // "usuario" que intente mandar por la URL, nunca la de otra persona.
+      filtro.usuario = req.user.userId;
+    } else if (req.user.rol === ROLES.ADMIN) {
       // Un Admin solo puede auditar a los Auxiliares, no a otros Admin ni a la Manager.
       const visibles = await usuariosVisiblesPara(req.user.rol);
       const idsPermitidos = visibles.map((u) => u._id.toString());
@@ -59,6 +63,11 @@ async function listAudit(req, res, next) {
 
 async function listUsuariosFiltrables(req, res, next) {
   try {
+    // Un Auxiliar no filtra por persona (solo ve lo suyo) - no tiene sentido mandarle la
+    // lista de todo el personal.
+    if (req.user.rol === ROLES.USER) {
+      return ok(res, []);
+    }
     const usuarios = await usuariosVisiblesPara(req.user.rol);
     usuarios.sort((a, b) => a.nombre.localeCompare(b.nombre));
     return ok(res, usuarios);

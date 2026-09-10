@@ -408,9 +408,16 @@ describe('Obtener un registro individual', () => {
 });
 
 describe('Auditoria', () => {
-  test('USER no puede leer el log de auditoria', async () => {
+  test('USER tambien puede leer el log de auditoria, pero solo el suyo', async () => {
+    const creado = await api(app)
+      .post('/api/catalog')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(libroValido('INV-USER-AUDIT'));
+    expect(creado.status).toBe(201);
+
     const res = await api(app).get('/api/audit').set('Authorization', `Bearer ${userToken}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.data.registros.every((r) => r.usuario._id === user._id.toString())).toBe(true);
   });
 
   test('Manager puede leer el log de auditoria', async () => {

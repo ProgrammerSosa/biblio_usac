@@ -48,6 +48,12 @@ const CAMPOS_NOTAS = ['notas', 'nota'];
 // numero de fila/renglon del Excel, no un dato a guardar.
 const CAMPOS_IGNORADOS = ['copias', 'copia', 'no.', 'no', '#'];
 
+// Cuando no se conoce el No. de Inventario real, en el Excel muchas veces se escribe un
+// marcador de "esto no aplica" en vez de dejar la celda vacia. Para el indice unique+sparse
+// eso SI es un valor real - dos filas con "N/A" chocarian entre si como si fuera el mismo
+// numero repetido. Se tratan igual que una celda vacia (sin numero, completar despues).
+const MARCADORES_SIN_DATO = new Set(['n/a', 'na', 'n.a.', 's/n', 'sin numero', '-', '--']);
+
 // Alias para columnas que son "campos propios de categoria" pero cuyo encabezado en Excel
 // no coincide letra por letra con la clave guardada en Category (ej. "Volúmen " -> VOLUMEN).
 const ALIAS_ATRIBUTOS = {
@@ -71,8 +77,17 @@ function leerEncabezados(worksheet) {
 
 function valorCelda(cell) {
   if (cell === null || cell === undefined) return '';
-  if (typeof cell === 'object' && cell.text !== undefined) return cell.text;
-  if (typeof cell === 'object' && cell.result !== undefined) return cell.result;
+  if (typeof cell === 'object') {
+    // Texto con formato mixto dentro de una misma celda (ej. una palabra en negrita) - Excel
+    // lo guarda como varios "runs" en vez de un solo texto plano. Sin esto, el objeto crudo
+    // llega hasta la base de datos y se guarda literal como "[object Object]", o revienta la
+    // validacion (los campos de texto no aceptan un objeto).
+    if (Array.isArray(cell.richText)) return cell.richText.map((run) => run.text || '').join('');
+    if (cell.text !== undefined) return cell.text;
+    if (cell.result !== undefined) return cell.result;
+    // Forma de celda que no se reconoce: mejor vacio que arriesgar guardar el objeto crudo.
+    return '';
+  }
   return cell;
 }
 
@@ -81,11 +96,17 @@ function filaVacia(datos) {
 }
 
 // Misma regla que la vista de catalogo (CatalogListPage): dos filas son "el mismo material"
-// si autor, titulo, edicion e idioma coinciden 100% (normalizado - sin acentos ni espacios
-// de mas), sin importar el estado fisico. Ya no se declara un numero de copias a mano: si
-// varias filas del Excel cumplen esto, se cuentan solas como copias del mismo registro.
+// si TODO coincide 100% (normalizado - sin acentos, mayusculas ni espacios de mas) excepto
+// el estado fisico y el No. de Inventario - los dos unicos datos que de verdad cambian entre
+// copias fisicas del mismo libro. Ya no se declara un numero de copias a mano: si varias
+// filas del Excel cumplen esto, se cuentan solas como copias del mismo registro.
 function claveDeGrupo(datos) {
-  return ['autor', 'titulo', 'edicion', 'idioma'].map((campo) => normalizarTexto(datos[campo])).join('|');
+  const camposBase = [datos.categoria, datos.autor, datos.titulo, datos.idioma, datos.anio, datos.edicion, datos.lugar, datos.paginasImpresas];
+  const atributos = datos.atributos || {};
+  const atributosOrdenados = Object.keys(atributos)
+    .sort()
+    .map((clave) => `${clave}:${atributos[clave]}`);
+  return [...camposBase, ...atributosOrdenados].map(normalizarTexto).join('|');
 }
 
 function agruparPorCopias(items) {
@@ -205,7 +226,8 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
       if (notas) {
         datos.estadoFisico = [datos.estadoFisico, notas].filter(Boolean).join(' - ');
       }
-      datos.noInventario = String(datos.noInventario || '').trim() || undefined;
+      const noInventarioTexto = String(datos.noInventario || '').trim();
+      datos.noInventario = noInventarioTexto && !MARCADORES_SIN_DATO.has(normalizarTexto(noInventarioTexto)) ? noInventarioTexto : undefined;
       datos.autor = String(datos.autor || '').trim();
       datos.titulo = String(datos.titulo || '').trim();
 
@@ -243,4 +265,4 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
   return resultado;
 }
 
-module.exports = { previsualizarWorkbook, normalizarTexto };
+module.exports = { previsualizarWorkbook, normalizarTexto, MARCADORES_SIN_DATO };

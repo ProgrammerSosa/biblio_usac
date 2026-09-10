@@ -26,12 +26,12 @@ export const router = createBrowserRouter([
           { path: '/catalogo', element: <CatalogListPage /> },
           { path: '/catalogo/nuevo', element: <CatalogFormPage /> },
           { path: '/catalogo/:id/editar', element: <CatalogFormPage /> },
+          { path: '/catalogo/importar', element: <ImportPage /> },
+          { path: '/auditoria', element: <AuditPage /> },
           {
             element: <RequireRole roles={['ADMIN', 'MANAGER']} />,
             children: [
-              { path: '/catalogo/importar', element: <ImportPage /> },
               { path: '/aprobaciones', element: <ApprovalsPage /> },
-              { path: '/auditoria', element: <AuditPage /> },
               { path: '/equipo', element: <TeamPage /> },
               { path: '/equipo/:id', element: <ProfilePage /> },
             ],
