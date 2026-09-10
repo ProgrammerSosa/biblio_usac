@@ -304,7 +304,10 @@ export default function ImportPage() {
                                       onChange={() => toggleUsarCopias(hoja.categoria, item.fila)}
                                       className="rounded border-border text-primary focus:ring-primary/30"
                                     />
-                                    Crear {item.copias} copias
+                                    {/* item.copias sigue siendo el total real de registros a crear
+                                        (eso no cambia) - aqui solo se resta 1 en el texto: el primer
+                                        ejemplar no es "copia de si mismo", el resto son las copias. */}
+                                    Crear {item.copias - 1} {item.copias === 2 ? 'copia adicional' : 'copias adicionales'}
                                   </label>
                                 ) : (
                                   '1'

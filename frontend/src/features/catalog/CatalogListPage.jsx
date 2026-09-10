@@ -373,8 +373,10 @@ export default function CatalogListPage() {
       header: 'No. Inv.',
       render: (row) =>
         row.copias.length > 1 ? (
+          // El primer ejemplar no es "copia de si mismo" - se muestran las copias
+          // adicionales (total menos el original), aunque los N registros existen igual.
           <Badge tone="primary" icon={Layers}>
-            {row.copias.length} copias
+            {row.copias.length - 1} {row.copias.length === 2 ? 'copia' : 'copias'}
           </Badge>
         ) : (
           row.noInventario || 'N/A'
