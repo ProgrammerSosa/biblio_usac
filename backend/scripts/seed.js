@@ -9,8 +9,8 @@ const { hashPassword } = require('../helpers/password');
 const { generarClave } = require('../helpers/slug');
 
 const DEFAULT_MANAGER_NOMBRE = process.env.DEFAULT_MANAGER_NOMBRE || 'libroderecho';
-const DEFAULT_MANAGER_EMAIL = process.env.DEFAULT_MANAGER_EMAIL || 'l@wbook';
-const DEFAULT_MANAGER_PASSWORD = process.env.DEFAULT_MANAGER_PASSWORD || '@dmin123';
+const DEFAULT_MANAGER_EMAIL = process.env.DEFAULT_MANAGER_EMAIL || 'sosabalcarcel@gmail.com';
+const DEFAULT_MANAGER_PASSWORD = process.env.DEFAULT_MANAGER_PASSWORD || 'l@wbook';
 
 // clave de cada campo se genera igual que cuando la Manager crea una categoria desde la app,
 // para que un campo "Editorial" tenga siempre la misma clave sin importar de donde salio.
