@@ -27,6 +27,10 @@ const categorySchema = new mongoose.Schema(
       type: [campoSchema],
       default: [],
     },
+    camposComunesDesactivados: {
+      type: [String],
+      default: [],
+    },
     activo: {
       type: Boolean,
       default: true,

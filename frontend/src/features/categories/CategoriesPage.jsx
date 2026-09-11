@@ -12,6 +12,34 @@ import { Input } from '../../shared/components/FormField';
 
 const CAMPO_VACIO = () => ({ etiqueta: '', requerido: true });
 
+// Campos que el formulario de registro ya muestra siempre, sin importar la categoria.
+// Autor, Titulo y No. de Inventario nunca se pueden apagar; el resto si, por categoria.
+const CAMPOS_COMUNES_FIJOS = ['No. de Inventario', 'Autor', 'Titulo'];
+const CAMPOS_COMUNES_OPCIONALES = [
+  { clave: 'idioma', etiqueta: 'Idioma' },
+  { clave: 'anio', etiqueta: 'Ano' },
+  { clave: 'edicion', etiqueta: 'Edicion' },
+  { clave: 'lugar', etiqueta: 'Lugar' },
+  { clave: 'paginasImpresas', etiqueta: 'Paginas impresas' },
+  { clave: 'estadoFisico', etiqueta: 'Estado fisico' },
+];
+
+function normalizarTexto(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[.,]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const ETIQUETAS_COMUNES_NORMALIZADAS = new Set([
+  ...CAMPOS_COMUNES_FIJOS.map(normalizarTexto),
+  ...CAMPOS_COMUNES_OPCIONALES.map((c) => normalizarTexto(c.etiqueta)),
+  'no de inventario',
+]);
+
 export default function CategoriesPage() {
   const { recargar } = useCategories();
   const [categorias, setCategorias] = useState([]);
@@ -22,6 +50,7 @@ export default function CategoriesPage() {
   const [editando, setEditando] = useState(null);
   const [nombre, setNombre] = useState('');
   const [campos, setCampos] = useState([CAMPO_VACIO()]);
+  const [comunesDesactivados, setComunesDesactivados] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [errorModal, setErrorModal] = useState('');
 
@@ -50,6 +79,7 @@ export default function CategoriesPage() {
     setEditando(null);
     setNombre('');
     setCampos([CAMPO_VACIO()]);
+    setComunesDesactivados([]);
     setErrorModal('');
     setModalAbierto(true);
   }
@@ -58,8 +88,13 @@ export default function CategoriesPage() {
     setEditando(categoria);
     setNombre(categoria.nombre);
     setCampos(categoria.campos.length > 0 ? categoria.campos.map((c) => ({ ...c })) : [CAMPO_VACIO()]);
+    setComunesDesactivados(categoria.camposComunesDesactivados || []);
     setErrorModal('');
     setModalAbierto(true);
+  }
+
+  function alternarComun(clave) {
+    setComunesDesactivados((prev) => (prev.includes(clave) ? prev.filter((c) => c !== clave) : [...prev, clave]));
   }
 
   function actualizarCampo(index, cambios) {
@@ -85,12 +120,18 @@ export default function CategoriesPage() {
 
     const camposValidos = campos.filter((c) => c.etiqueta.trim());
 
+    const repetido = camposValidos.find((c) => ETIQUETAS_COMUNES_NORMALIZADAS.has(normalizarTexto(c.etiqueta)));
+    if (repetido) {
+      setErrorModal(`"${repetido.etiqueta.trim()}" ya es un campo comun del formulario, no hace falta agregarlo como campo propio`);
+      return;
+    }
+
     setGuardando(true);
     try {
       if (editando) {
-        await categoriesApi.update(editando._id, { nombre, campos: camposValidos });
+        await categoriesApi.update(editando._id, { nombre, campos: camposValidos, camposComunesDesactivados: comunesDesactivados });
       } else {
-        await categoriesApi.create({ nombre, campos: camposValidos });
+        await categoriesApi.create({ nombre, campos: camposValidos, camposComunesDesactivados: comunesDesactivados });
       }
       setModalAbierto(false);
       await cargar();
@@ -204,6 +245,32 @@ export default function CategoriesPage() {
               Clave interna: <code>{editando.clave}</code> (no cambia aunque edites el nombre)
             </p>
           ) : null}
+
+          <div>
+            <span className="text-sm font-medium text-slate-700">Campos comunes (ya vienen incluidos)</span>
+            <p className="mb-2 text-xs text-slate-400">
+              Estos campos los muestra el formulario para cualquier categoria. No hace falta volver a agregarlos abajo;
+              los que no sean obligatorios se pueden desactivar para esta categoria si no aplican.
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-md bg-surface p-3">
+              {CAMPOS_COMUNES_FIJOS.map((etiqueta) => (
+                <span key={etiqueta} className="text-xs text-slate-400" title="Siempre incluido, no se puede desactivar">
+                  {etiqueta}
+                </span>
+              ))}
+              {CAMPOS_COMUNES_OPCIONALES.map((campo) => (
+                <label key={campo.clave} className="flex items-center gap-1.5 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!comunesDesactivados.includes(campo.clave)}
+                    onChange={() => alternarComun(campo.clave)}
+                    className="rounded border-border text-primary focus:ring-primary/30"
+                  />
+                  {campo.etiqueta}
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between">

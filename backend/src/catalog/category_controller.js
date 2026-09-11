@@ -5,15 +5,64 @@ const { generarClave } = require('../../helpers/slug');
 const { ACCIONES_AUDITORIA } = require('../../utils/constants');
 const { ok, created, fail, notFound } = require('../../utils/httpResponse');
 
+// Campos comunes: el formulario de registro los muestra siempre, sin importar la categoria,
+// asi que no tiene sentido (y genera campos repetidos) que alguien los agregue de nuevo como
+// "campo propio" de una categoria. Autor, Titulo y No. de Inventario nunca se pueden desactivar;
+// el resto la categoria los puede apagar via camposComunesDesactivados.
+const CLAVES_COMUNES_DESACTIVABLES = ['idioma', 'anio', 'edicion', 'lugar', 'paginasImpresas', 'estadoFisico'];
+const ETIQUETAS_COMUNES = [
+  'No. de Inventario',
+  'Autor',
+  'Titulo',
+  'Idioma',
+  'Ano',
+  'Edicion',
+  'Lugar',
+  'Paginas impresas',
+  'Estado fisico',
+];
+
+function normalizarTexto(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[.,]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const ETIQUETAS_COMUNES_NORMALIZADAS = new Set([
+  ...ETIQUETAS_COMUNES.map(normalizarTexto),
+  'no de inventario',
+]);
+
+function normalizarComunesDesactivados(valores) {
+  if (!Array.isArray(valores)) return [];
+  return [...new Set(valores.filter((v) => CLAVES_COMUNES_DESACTIVABLES.includes(v)))];
+}
+
 function normalizarCampos(campos) {
-  if (!Array.isArray(campos)) return [];
-  return campos
-    .filter((c) => c && typeof c.etiqueta === 'string' && c.etiqueta.trim())
-    .map((c) => ({
+  if (!Array.isArray(campos)) return { campos: [], error: null };
+
+  const limpios = campos.filter((c) => c && typeof c.etiqueta === 'string' && c.etiqueta.trim());
+
+  const repetido = limpios.find((c) => ETIQUETAS_COMUNES_NORMALIZADAS.has(normalizarTexto(c.etiqueta)));
+  if (repetido) {
+    return {
+      campos: null,
+      error: `"${repetido.etiqueta.trim()}" ya es un campo comun del formulario, no hace falta agregarlo como campo propio`,
+    };
+  }
+
+  return {
+    campos: limpios.map((c) => ({
       clave: generarClave(c.etiqueta),
       etiqueta: c.etiqueta.trim(),
       requerido: c.requerido !== false,
-    }));
+    })),
+    error: null,
+  };
 }
 
 async function listCategories(req, res, next) {
@@ -28,7 +77,7 @@ async function listCategories(req, res, next) {
 
 async function createCategory(req, res, next) {
   try {
-    const { nombre, campos } = req.body;
+    const { nombre, campos, camposComunesDesactivados } = req.body;
 
     if (!nombre || !nombre.trim()) {
       return fail(res, 'El nombre de la categoria es obligatorio');
@@ -44,10 +93,16 @@ async function createCategory(req, res, next) {
       return fail(res, `Ya existe una categoria equivalente a '${nombre}'`, 409);
     }
 
+    const { campos: camposNormalizados, error: errorCampos } = normalizarCampos(campos);
+    if (errorCampos) {
+      return fail(res, errorCampos);
+    }
+
     const categoria = await Category.create({
       clave,
       nombre: nombre.trim(),
-      campos: normalizarCampos(campos),
+      campos: camposNormalizados,
+      camposComunesDesactivados: normalizarComunesDesactivados(camposComunesDesactivados),
     });
 
     await registrarAuditoria({
@@ -79,7 +134,15 @@ async function updateCategory(req, res, next) {
     }
 
     if (req.body.campos !== undefined) {
-      categoria.campos = normalizarCampos(req.body.campos);
+      const { campos: camposNormalizados, error: errorCampos } = normalizarCampos(req.body.campos);
+      if (errorCampos) {
+        return fail(res, errorCampos);
+      }
+      categoria.campos = camposNormalizados;
+    }
+
+    if (req.body.camposComunesDesactivados !== undefined) {
+      categoria.camposComunesDesactivados = normalizarComunesDesactivados(req.body.camposComunesDesactivados);
     }
 
     await categoria.save();

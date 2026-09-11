@@ -27,7 +27,7 @@ export default function CatalogFormPage() {
   const { id } = useParams();
   const esEdicion = !!id;
   const { user } = useAuth();
-  const { categorias, camposDe, loading: cargandoCategorias } = useCategories();
+  const { categorias, camposDe, porClave, loading: cargandoCategorias } = useCategories();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({ ...CAMPOS_COMUNES_INICIALES });
@@ -39,6 +39,10 @@ export default function CatalogFormPage() {
   const categoriasDisponibles =
     user?.rol === ROLES.USER ? categorias.filter((c) => user.allowedCategories.includes(c.clave)) : categorias;
   const camposCondicionales = camposDe(form.categoria);
+  const comunesDesactivados = porClave(form.categoria)?.camposComunesDesactivados || [];
+  const comunHabilitado = (clave) => !comunesDesactivados.includes(clave);
+  const grupo1Visibles = ['idioma', 'anio', 'edicion'].filter(comunHabilitado).length;
+  const grupo2Visibles = ['lugar', 'paginasImpresas'].filter(comunHabilitado).length;
 
   useEffect(() => {
     if (!esEdicion) return;
@@ -166,22 +170,40 @@ export default function CatalogFormPage() {
             <Input label="Titulo" required value={form.titulo} onChange={(e) => handleChange('titulo', e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <Input label="Idioma" value={form.idioma} onChange={(e) => handleChange('idioma', e.target.value)} />
-            <Input label="Año" value={form.anio} onChange={(e) => handleChange('anio', e.target.value)} />
-            <Input label="Edicion" value={form.edicion} onChange={(e) => handleChange('edicion', e.target.value)} />
-          </div>
+          {grupo1Visibles > 0 && (
+            <div
+              className={`grid gap-4 ${
+                grupo1Visibles === 3 ? 'grid-cols-3' : grupo1Visibles === 2 ? 'grid-cols-2' : 'grid-cols-1'
+              }`}
+            >
+              {comunHabilitado('idioma') ? (
+                <Input label="Idioma" value={form.idioma} onChange={(e) => handleChange('idioma', e.target.value)} />
+              ) : null}
+              {comunHabilitado('anio') ? (
+                <Input label="Año" value={form.anio} onChange={(e) => handleChange('anio', e.target.value)} />
+              ) : null}
+              {comunHabilitado('edicion') ? (
+                <Input label="Edicion" value={form.edicion} onChange={(e) => handleChange('edicion', e.target.value)} />
+              ) : null}
+            </div>
+          )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Lugar" value={form.lugar} onChange={(e) => handleChange('lugar', e.target.value)} />
-            <Input
-              label="Paginas impresas"
-              type="number"
-              min="0"
-              value={form.paginasImpresas}
-              onChange={(e) => handleChange('paginasImpresas', e.target.value)}
-            />
-          </div>
+          {grupo2Visibles > 0 && (
+            <div className={`grid gap-4 ${grupo2Visibles === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {comunHabilitado('lugar') ? (
+                <Input label="Lugar" value={form.lugar} onChange={(e) => handleChange('lugar', e.target.value)} />
+              ) : null}
+              {comunHabilitado('paginasImpresas') ? (
+                <Input
+                  label="Paginas impresas"
+                  type="number"
+                  min="0"
+                  value={form.paginasImpresas}
+                  onChange={(e) => handleChange('paginasImpresas', e.target.value)}
+                />
+              ) : null}
+            </div>
+          )}
 
           {camposCondicionales.length > 0 ? (
             <div className="grid grid-cols-2 gap-4 rounded-md bg-surface p-4">
@@ -197,12 +219,14 @@ export default function CatalogFormPage() {
             </div>
           ) : null}
 
-          <Textarea
-            label="Estado fisico"
-            placeholder="Describe el estado del material, ej. Pasta dañada, manchas de humedad en portadas"
-            value={form.estadoFisico}
-            onChange={(e) => handleChange('estadoFisico', e.target.value)}
-          />
+          {comunHabilitado('estadoFisico') ? (
+            <Textarea
+              label="Estado fisico"
+              placeholder="Describe el estado del material, ej. Pasta dañada, manchas de humedad en portadas"
+              value={form.estadoFisico}
+              onChange={(e) => handleChange('estadoFisico', e.target.value)}
+            />
+          ) : null}
 
           <AlertBanner>{error}</AlertBanner>
 

@@ -70,6 +70,25 @@ describe('CRUD de categorias', () => {
     ]);
   });
 
+  test('rechaza un campo propio que repite el nombre de un campo comun', async () => {
+    const res = await api(app)
+      .post('/api/categories')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ nombre: 'Tesis', campos: [{ etiqueta: 'No. de Inventario', requerido: false }] });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('Manager puede desactivar campos comunes opcionales de una categoria', async () => {
+    const res = await api(app)
+      .post('/api/categories')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ nombre: 'Mapas', campos: [], camposComunesDesactivados: ['edicion', 'lugar', 'campoInventado'] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.camposComunesDesactivados.sort()).toEqual(['edicion', 'lugar']);
+  });
+
   test('Admin y Auxiliar no pueden crear categorias', async () => {
     const payload = { nombre: 'Otra Categoria', campos: [] };
 
