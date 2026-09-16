@@ -5,6 +5,7 @@ const { filtroVisibilidadBorradores } = require('../catalog/catalog_controller')
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants');
 const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
+const { resolverOrden } = require('../../helpers/catalogSort');
 const { escapeRegExp } = require('../../helpers/regex');
 const { fail } = require('../../utils/httpResponse');
 
@@ -146,7 +147,7 @@ function agruparPorCategoria(registros) {
 
 async function exportCatalogPdf(req, res, next) {
   try {
-    const { estadoRevision, categoria, buscar, registradoPor } = req.query;
+    const { estadoRevision, categoria, buscar, registradoPor, sort } = req.query;
 
     const filtro = { eliminado: false };
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
@@ -163,7 +164,10 @@ async function exportCatalogPdf(req, res, next) {
     }
     const filtroFinal = { $and: clausulas };
 
-    const registros = await Catalog.find(filtroFinal).sort({ categoria: 1, titulo: 1 });
+    const { sort: sortSpec, collation } = resolverOrden(sort);
+    const consulta = Catalog.find(filtroFinal).sort({ categoria: 1, ...sortSpec });
+    if (collation) consulta.collation(collation);
+    const registros = await consulta;
 
     if (registros.length === 0) {
       return fail(res, 'No hay registros que coincidan con los filtros indicados', 404);

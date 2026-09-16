@@ -67,6 +67,22 @@ export const ACCION_TONOS = {
   DESACTIVAR_CATEGORIA: 'danger',
 };
 
+// Mismos 8 valores que resuelve el backend (helpers/catalogSort.js) - un valor
+// desconocido o vacio cae al orden por defecto (fecha_desc), asi que el select
+// siempre puede arrancar en 'fecha_desc' sin mandar nada especial.
+export const ORDEN_POR_DEFECTO = 'fecha_desc';
+
+export const OPCIONES_ORDEN_CATALOGO = [
+  { value: 'fecha_desc', label: 'Fecha de registro (mas reciente)' },
+  { value: 'fecha_asc', label: 'Fecha de registro (mas antiguo)' },
+  { value: 'titulo_asc', label: 'Titulo (A-Z)' },
+  { value: 'titulo_desc', label: 'Titulo (Z-A)' },
+  { value: 'autor_asc', label: 'Autor (A-Z)' },
+  { value: 'autor_desc', label: 'Autor (Z-A)' },
+  { value: 'anio_desc', label: 'Año (mas nuevo)' },
+  { value: 'anio_asc', label: 'Año (mas antiguo)' },
+];
+
 const PALABRAS_DANO = ['dañ', 'dani', 'humedad', 'mancha', 'rasgad', 'roto', 'rota', 'deteriorad', 'polilla', 'hongo'];
 
 export function tieneDanoFisico(estadoFisico) {

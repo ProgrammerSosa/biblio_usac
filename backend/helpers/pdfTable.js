@@ -1,5 +1,6 @@
 const HEADER_FILL = '#1e3a8a';
 const HEADER_TEXT = '#ffffff';
+const HEADER_BORDER = '#0f172a';
 const ROW_TEXT = '#0f172a';
 const DANGER_TEXT = '#dc2626';
 const BORDER_COLOR = '#e2e8f0';
@@ -48,6 +49,15 @@ function drawTableHeader(doc, { x, y, columns }) {
 
   columns.forEach((col) => {
     doc.text(col.header, cursorX + PADDING_X, y + PADDING_Y, { width: col.width - PADDING_X * 2 });
+    cursorX += col.width;
+  });
+
+  // Contorno alrededor de cada casilla del encabezado (no solo del bloque
+  // completo) para que cada columna resalte por separado dentro del azul.
+  cursorX = x;
+  doc.strokeColor(HEADER_BORDER).lineWidth(0.75);
+  columns.forEach((col) => {
+    doc.rect(cursorX, y, col.width, alto).stroke();
     cursorX += col.width;
   });
 

@@ -170,6 +170,42 @@ describe('Exportacion de catalogo a PDF', () => {
     expect(auditoria).toHaveLength(1);
   });
 
+  test('el parametro sort (ej. titulo_desc) no rompe el export y respeta un valor desconocido', async () => {
+    const managerToken = await crearUsuarioConToken(ROLES.MANAGER);
+    const manager = await User.findOne({ rol: ROLES.MANAGER });
+
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-SORT-1',
+      autor: 'Autor A',
+      titulo: 'Titulo A',
+      atributos: { EDITORIAL: 'E', ISBN: '1', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      enviado: true,
+      registradoPor: manager._id,
+    });
+    await Catalog.create({
+      categoria: 'LIBRO',
+      noInventario: 'INV-SORT-2',
+      autor: 'Autor B',
+      titulo: 'Titulo B',
+      atributos: { EDITORIAL: 'E', ISBN: '2', TIPO_DE_DOCUMENTO: 'Fisico' },
+      estadoRevision: 'APROBADO',
+      enviado: true,
+      registradoPor: manager._id,
+    });
+
+    const conOrdenValido = await api(app)
+      .get('/api/exports/catalog?sort=titulo_desc')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(conOrdenValido.status).toBe(200);
+
+    const conOrdenInventado = await api(app)
+      .get('/api/exports/catalog?sort=noExisteEsteOrden')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(conOrdenInventado.status).toBe(200);
+  });
+
   test('responde 404 cuando no hay registros que coincidan con el filtro', async () => {
     const managerToken = await crearUsuarioConToken(ROLES.MANAGER);
     const res = await api(app)
