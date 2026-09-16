@@ -66,14 +66,14 @@ async function construirExcelDePrueba() {
     'Copias',
     'Donante',
   ]);
-  hoja.addRow([1, 'Autor Valido', 'Libro Valido Unico', 'Espanol', 2020, '1ra', 'Editorial X', 'Guatemala', '978-1', 'Fisico', 200, 'IMP-001', 'Buen estado', 'Sin notas', 1, '']);
+  hoja.addRow([1, 'Autor Valido', 'Libro Valido Unico', 'Español', 2020, '1ra', 'Editorial X', 'Guatemala', '978-1', 'Fisico', 200, 'IMP-001', 'Buen estado', 'Sin notas', 1, '']);
   // Estas 3 filas son "el mismo libro" (autor+titulo+edicion+idioma) con variaciones tipicas
   // de Excel real: con/sin acento, mayusculas y espacios de mas, y estado fisico distinto -
   // deben agruparse solas en un item con copias:3, sin usar la columna "Copias" para nada.
-  hoja.addRow([2, 'Jose Copias', 'Libro Con Copias', 'Espanol', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002', 'Buen estado', '', '', 'Donante X']);
-  hoja.addRow([3, 'José Copias', 'Libro Con Copias', 'Espanol', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002B', 'Regular', '', '', '']);
-  hoja.addRow([4, 'JOSE  COPIAS', '  Libro Con Copias ', 'Espanol', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002C', 'Deteriorado', '', '', '']);
-  hoja.addRow([5, 'Autor Incompleto', 'Libro Sin ISBN', 'Espanol', 2018, '1ra', 'Editorial Z', 'Guatemala', '', 'Fisico', 100, '', 'Regular', '', '', '']);
+  hoja.addRow([2, 'Jose Copias', 'Libro Con Copias', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002', 'Buen estado', '', '', 'Donante X']);
+  hoja.addRow([3, 'José Copias', 'Libro Con Copias', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002B', 'Regular', '', '', '']);
+  hoja.addRow([4, 'JOSE  COPIAS', '  Libro Con Copias ', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002C', 'Deteriorado', '', '', '']);
+  hoja.addRow([5, 'Autor Incompleto', 'Libro Sin ISBN', 'Español', 2018, '1ra', 'Editorial Z', 'Guatemala', '', 'Fisico', 100, '', 'Regular', '', '', '']);
   hoja.addRow([]); // fila vacia, debe ignorarse
 
   return workbook.xlsx.writeBuffer();
@@ -154,8 +154,8 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
     hoja.addRow(['Autor', 'Titulo', 'Idioma', 'Año', 'Edicion', 'Editorial', 'Lugar', 'ISBN', 'Tipo de documento', 'Paginas impresas']);
     // Mismo autor+titulo+edicion+idioma que antes bastaba para agrupar, pero el Año cambia -
     // son ediciones/impresiones distintas del mismo libro, no la misma copia fisica.
-    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Espanol', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
-    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Espanol', 2021, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
+    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
+    hoja.addRow(['Autor Igual', 'Mismo Titulo', 'Español', 2021, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150]);
     const buffer = await workbook.xlsx.writeBuffer();
 
     const res = await api(app)
@@ -283,7 +283,7 @@ describe('POST /api/catalog/importar/confirmar', () => {
       noInventario: 'IMP-CONF-1',
       autor: 'Autor Importado',
       titulo: 'Titulo Importado',
-      idioma: 'Espanol',
+      idioma: 'Español',
       anio: '2020',
       edicion: '1ra',
       lugar: 'Guatemala',

@@ -34,9 +34,13 @@ function calcularAltoFila(doc, columns, row) {
   }, ALTO_MIN_FILA);
 }
 
+function anchoDe(columns) {
+  return columns.reduce((sum, col) => sum + col.width, 0);
+}
+
 function drawTableHeader(doc, { x, y, columns }) {
   let cursorX = x;
-  const width = columns.reduce((sum, col) => sum + col.width, 0);
+  const width = anchoDe(columns);
   const alto = calcularAltoHeader(doc, columns);
 
   doc.rect(x, y, width, alto).fill(HEADER_FILL);
@@ -50,39 +54,76 @@ function drawTableHeader(doc, { x, y, columns }) {
   return y + alto;
 }
 
-/**
- * Dibuja una tabla con bordes y encabezado repetido en cada pagina nueva.
- * Cada fila mide lo que necesite su contenido (nunca se recorta texto).
- * Devuelve la posicion Y final, para poder seguir escribiendo debajo.
- */
-function drawTable(doc, { x, columns, rows }) {
-  const bottomLimit = doc.page.height - doc.page.margins.bottom;
-  const width = columns.reduce((sum, col) => sum + col.width, 0);
+function drawFila(doc, { x, y, columns, row }) {
+  const alto = calcularAltoFila(doc, columns, row);
+  const width = anchoDe(columns);
+  let cursorX = x;
 
-  let y = drawTableHeader(doc, { x, y: doc.y, columns });
+  doc.rect(x, y, width, alto).strokeColor(BORDER_COLOR).stroke();
+
+  columns.forEach((col) => {
+    const valor = col.render ? col.render(row) : row[col.key] ?? 'N/A';
+    doc
+      .fillColor(col.colorFn ? col.colorFn(row) || ROW_TEXT : ROW_TEXT)
+      .font('Helvetica')
+      .fontSize(FONT_SIZE)
+      .text(String(valor ?? 'N/A'), cursorX + PADDING_X, y + PADDING_Y, { width: col.width - PADDING_X * 2 });
+    cursorX += col.width;
+  });
+
+  return y + alto;
+}
+
+// Encabezados de todos los grupos de columnas, uno debajo del otro (una sola vez,
+// arriba de la tabla y de nuevo al inicio de cada pagina nueva).
+function drawEncabezados(doc, { x, y, columnGroups }) {
+  return columnGroups.reduce((cursorY, columns) => drawTableHeader(doc, { x, y: cursorY, columns }), y);
+}
+
+function altoEncabezados(doc, columnGroups) {
+  return columnGroups.reduce((total, columns) => total + calcularAltoHeader(doc, columns), 0);
+}
+
+// Cuanto mide en total, verticalmente, el bloque completo de UN registro (todas
+// sus filas, una por grupo de columnas).
+function altoBloqueRegistro(doc, columnGroups, row) {
+  return columnGroups.reduce((total, columns) => total + calcularAltoFila(doc, columns, row), 0);
+}
+
+/**
+ * Dibuja una tabla donde cada registro puede tener mas de una fila (una por
+ * grupo de columnas, ej. datos principales + atributos que no cupieron al
+ * lado). El encabezado se repite justo arriba de CADA registro (no solo una
+ * vez al inicio de la tabla) - asi cada libro queda como un bloque completo y
+ * autocontenido, con sus columnas identificadas ahi mismo, sin tener que subir
+ * la vista para saber que significa cada dato. Si el bloque completo de un
+ * registro (encabezados + filas) no cabe en lo que queda de la pagina, se pasa
+ * entero a la siguiente (nunca se parte a la mitad).
+ * `columns` (un solo arreglo) tambien se acepta para tablas de un solo grupo.
+ */
+function drawTable(doc, { x, columns, columnGroups, rows }) {
+  const grupos = columnGroups || [columns];
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+
+  let y = doc.y;
 
   rows.forEach((row) => {
-    const altoFila = calcularAltoFila(doc, columns, row);
+    const altoBloque = altoEncabezados(doc, grupos) + altoBloqueRegistro(doc, grupos, row);
 
-    if (y + altoFila > bottomLimit) {
+    // Si el bloque completo (encabezados + registro) no cabe entero en lo que
+    // queda de la pagina, se pasa a una nueva antes de dibujar nada - si no,
+    // pdfkit corta cada celda que se sale del margen en su propia pagina en
+    // blanco (una palabra por hoja), en vez de mover el bloque completo.
+    if (y + altoBloque > bottomLimit) {
       doc.addPage();
-      y = drawTableHeader(doc, { x, y: doc.page.margins.top, columns });
+      y = doc.page.margins.top;
     }
 
-    let cursorX = x;
-    doc.rect(x, y, width, altoFila).strokeColor(BORDER_COLOR).stroke();
+    y = drawEncabezados(doc, { x, y, columnGroups: grupos });
 
-    columns.forEach((col) => {
-      const valor = col.render ? col.render(row) : row[col.key] ?? 'N/A';
-      doc
-        .fillColor(col.colorFn ? col.colorFn(row) || ROW_TEXT : ROW_TEXT)
-        .font('Helvetica')
-        .fontSize(FONT_SIZE)
-        .text(String(valor ?? 'N/A'), cursorX + PADDING_X, y + PADDING_Y, { width: col.width - PADDING_X * 2 });
-      cursorX += col.width;
+    grupos.forEach((cols) => {
+      y = drawFila(doc, { x, y, columns: cols, row });
     });
-
-    y += altoFila;
   });
 
   doc.y = y;

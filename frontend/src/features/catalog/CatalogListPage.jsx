@@ -420,7 +420,7 @@ export default function CatalogListPage() {
         if (conDano.length > 0) {
           return (
             <Badge tone="danger" icon={AlertTriangle}>
-              {conDano.length} de {row.copias.length} con dano
+              {conDano.length} de {row.copias.length} con daño
             </Badge>
           );
         }

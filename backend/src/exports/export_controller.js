@@ -14,7 +14,7 @@ const ESTADO_LABELS = {
   RECHAZADO: 'Rechazado',
 };
 
-// Tamano oficio (8.5" x 13") en puntos, para tener mas ancho que A4 y que quepan
+// Tamaño oficio (8.5" x 13") en puntos, para tener mas ancho que A4 y que quepan
 // mas columnas de atributos antes de necesitar una tabla de continuacion.
 const TAMANO_PAGINA_OFICIO = [612, 936];
 
@@ -24,24 +24,50 @@ const TAMANO_PAGINA_OFICIO = [612, 936];
 const ANCHO_MIN_ATRIBUTO = 70;
 const ANCHO_MAX_ATRIBUTO = 220;
 
-const COLUMNAS_BASE = () => [
-  { key: 'noInventario', header: 'No. Inv.', width: 55 },
-  { key: 'titulo', header: 'Titulo', width: 160 },
-  { key: 'autor', header: 'Autor', width: 110 },
+const COLUMNAS_FIJAS = () => [
+  { key: 'noInventario', header: 'No. Inv.', width: 50 },
+  { key: 'titulo', header: 'Titulo', width: 140 },
+  { key: 'autor', header: 'Autor', width: 95 },
 ];
 
-const COLUMNAS_FINALES = () => [
-  { key: 'anio', header: 'Anio', width: 40 },
-  { key: 'estadoRevision', header: 'Estado', width: 75, render: estadoRevisionTexto },
-  { key: 'estadoFisico', header: 'Estado fisico', width: 120, render: estadoFisicoTexto, colorFn: colorSiDanado },
+// "idioma", "anio", "edicion", "lugar" y "paginasImpresas" son campos comunes del
+// catalogo (existen para cualquier categoria, ver catalog_model.js) y no campos
+// propios de la categoria (esos van en categoriaDoc.campos) - por eso antes no
+// salian en el PDF: construirColumnas solo recorria categoriaDoc.campos. Cada
+// categoria puede apagar cualquiera de estos desde Gestion de Categorias
+// (camposComunesDesactivados), asi que el reporte debe respetar esa misma regla.
+const CAMPOS_COMUNES_OPCIONALES = [
+  { clave: 'idioma', key: 'idioma', header: 'Idioma', width: 55 },
+  { clave: 'anio', key: 'anio', header: 'Anio', width: 40 },
+  { clave: 'edicion', key: 'edicion', header: 'Edicion', width: 65 },
+  { clave: 'lugar', key: 'lugar', header: 'Lugar', width: 75 },
+  { clave: 'paginasImpresas', key: 'paginasImpresas', header: 'Paginas', width: 50 },
 ];
+
+const COLUMNA_ESTADO_REVISION = () => ({ key: 'estadoRevision', header: 'Estado', width: 65, render: estadoRevisionTexto });
+const COLUMNA_ESTADO_FISICO = () => ({
+  clave: 'estadoFisico',
+  key: 'estadoFisico',
+  header: 'Estado fisico',
+  width: 100,
+  render: estadoFisicoTexto,
+  colorFn: colorSiDanado,
+});
 
 // Cuando los atributos de una categoria no caben en una sola tabla, las columnas
-// que sobran se dibujan debajo repitiendo estas dos para poder ubicar cada fila.
-const COLUMNAS_IDENTIDAD_CONTINUACION = () => [
-  { key: 'noInventario', header: 'No. Inv.', width: 55 },
-  { key: 'titulo', header: 'Titulo', width: 200 },
-];
+// que sobran se dibujan debajo repitiendo esta para poder ubicar cada fila. No
+// hace falta repetir tambien "No. Inv." porque el encabezado (y por lo tanto el
+// registro completo) siempre queda junto, nunca separado del titulo.
+const COLUMNAS_IDENTIDAD_CONTINUACION = () => [{ key: 'titulo', header: 'Titulo', width: 220 }];
+
+// Columnas comunes (Idioma, Anio, Edicion, Lugar, Paginas) que esta categoria no
+// desactivo, mas Estado fisico si tampoco esta desactivado para ella.
+function columnasComunesActivas(categoriaDoc) {
+  const desactivados = categoriaDoc.camposComunesDesactivados || [];
+  const opcionales = CAMPOS_COMUNES_OPCIONALES.filter((c) => !desactivados.includes(c.clave)).map(({ clave, ...columna }) => columna);
+  const finales = [COLUMNA_ESTADO_REVISION(), ...(desactivados.includes('estadoFisico') ? [] : [COLUMNA_ESTADO_FISICO()])];
+  return { opcionales, finales };
+}
 
 const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT : null);
 const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
@@ -71,13 +97,14 @@ function construirColumnasAtributos(campos) {
 // ninguna columna termina mas angosta que ANCHO_MIN_ATRIBUTO, sin importar
 // cuantos campos tenga la categoria.
 function construirGruposColumnas(categoriaDoc, anchoDisponible) {
+  const { opcionales: comunesActivos, finales: columnasFinales } = columnasComunesActivas(categoriaDoc);
   const columnasAtributos = construirColumnasAtributos(categoriaDoc.campos || []);
 
   if (columnasAtributos.length === 0) {
-    return [[...COLUMNAS_BASE(), ...COLUMNAS_FINALES()]];
+    return [[...COLUMNAS_FIJAS(), ...comunesActivos, ...columnasFinales]];
   }
 
-  const anchoBase = sumaAnchos(COLUMNAS_BASE()) + sumaAnchos(COLUMNAS_FINALES());
+  const anchoBase = sumaAnchos(COLUMNAS_FIJAS()) + sumaAnchos(comunesActivos) + sumaAnchos(columnasFinales);
   const anchoIdentidad = sumaAnchos(COLUMNAS_IDENTIDAD_CONTINUACION());
 
   const grupos = [];
@@ -95,7 +122,11 @@ function construirGruposColumnas(categoriaDoc, anchoDisponible) {
       columna.width = anchoPorColumna;
     });
 
-    grupos.push(esPrimerGrupo ? [...COLUMNAS_BASE(), ...lote, ...COLUMNAS_FINALES()] : [...COLUMNAS_IDENTIDAD_CONTINUACION(), ...lote]);
+    grupos.push(
+      esPrimerGrupo
+        ? [...COLUMNAS_FIJAS(), ...comunesActivos, ...lote, ...columnasFinales]
+        : [...COLUMNAS_IDENTIDAD_CONTINUACION(), ...lote]
+    );
     esPrimerGrupo = false;
   }
 
@@ -185,10 +216,7 @@ async function exportCatalogPdf(req, res, next) {
 
       const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const gruposColumnas = construirGruposColumnas(categoriaDoc, anchoDisponible);
-      gruposColumnas.forEach((columnas, indice) => {
-        if (indice > 0) doc.moveDown(0.2);
-        drawTable(doc, { x: doc.page.margins.left, columns: columnas, rows: filas });
-      });
+      drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas });
       doc.moveDown(1);
     }
 
