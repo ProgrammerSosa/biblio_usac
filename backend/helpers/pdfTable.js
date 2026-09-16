@@ -11,6 +11,17 @@ const FONT_SIZE = 8;
 const ALTO_MIN_HEADER = 20;
 const ALTO_MIN_FILA = 18;
 
+// Un campo opcional puede llegar como null/undefined (nunca se lleno) o como
+// string vacio "" (se lleno y se dejo en blanco, ej. al importar un Excel con
+// esa celda sin nada) - los dos casos deben verse igual como "N/A" en vez de
+// una celda muda que parece un error de la tabla.
+function valorCelda(col, row) {
+  const valor = col.render ? col.render(row) : row[col.key];
+  if (valor === null || valor === undefined) return 'N/A';
+  const texto = String(valor).trim();
+  return texto === '' ? 'N/A' : valor;
+}
+
 // Sin limite de altura ni "ellipsis": el texto siempre se dibuja completo, con
 // tantas lineas como necesite dentro del ancho de la columna. Por eso cada fila
 // (y el encabezado) mide su alto real segun el contenido mas largo, en vez de
@@ -29,8 +40,7 @@ function calcularAltoHeader(doc, columns) {
 
 function calcularAltoFila(doc, columns, row) {
   return columns.reduce((alto, col) => {
-    const valor = col.render ? col.render(row) : row[col.key] ?? 'N/A';
-    const h = altoTexto(doc, valor ?? 'N/A', col.width - PADDING_X * 2, 'Helvetica') + PADDING_Y * 2;
+    const h = altoTexto(doc, valorCelda(col, row), col.width - PADDING_X * 2, 'Helvetica') + PADDING_Y * 2;
     return Math.max(alto, h);
   }, ALTO_MIN_FILA);
 }
@@ -72,12 +82,11 @@ function drawFila(doc, { x, y, columns, row }) {
   doc.rect(x, y, width, alto).strokeColor(BORDER_COLOR).stroke();
 
   columns.forEach((col) => {
-    const valor = col.render ? col.render(row) : row[col.key] ?? 'N/A';
     doc
       .fillColor(col.colorFn ? col.colorFn(row) || ROW_TEXT : ROW_TEXT)
       .font('Helvetica')
       .fontSize(FONT_SIZE)
-      .text(String(valor ?? 'N/A'), cursorX + PADDING_X, y + PADDING_Y, { width: col.width - PADDING_X * 2 });
+      .text(String(valorCelda(col, row)), cursorX + PADDING_X, y + PADDING_Y, { width: col.width - PADDING_X * 2 });
     cursorX += col.width;
   });
 

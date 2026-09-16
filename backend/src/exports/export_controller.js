@@ -25,6 +25,17 @@ const TAMANO_PAGINA_OFICIO = [612, 936];
 const ANCHO_MIN_ATRIBUTO = 70;
 const ANCHO_MAX_ATRIBUTO = 220;
 
+// Numero de control (1, 2, 3...): solo para llevar la cuenta de cuantos
+// registros van en el reporte, en el mismo orden en que salen (respeta
+// "Ordenar por"). No se guarda en la base de datos ni depende del No. de
+// Inventario, que puede quedar vacio.
+const columnaNo = (numeroPorId) => ({
+  key: 'no',
+  header: 'No.',
+  width: 26,
+  render: (row) => String(numeroPorId.get(String(row._id)) ?? ''),
+});
+
 const COLUMNAS_FIJAS = () => [
   { key: 'noInventario', header: 'No. Inv.', width: 50 },
   { key: 'titulo', header: 'Titulo', width: 140 },
@@ -97,15 +108,16 @@ function construirColumnasAtributos(campos) {
 // debajo, cada una con su propio lote de columnas hasta agotarlos todos. Asi
 // ninguna columna termina mas angosta que ANCHO_MIN_ATRIBUTO, sin importar
 // cuantos campos tenga la categoria.
-function construirGruposColumnas(categoriaDoc, anchoDisponible) {
+function construirGruposColumnas(categoriaDoc, anchoDisponible, numeroPorId) {
   const { opcionales: comunesActivos, finales: columnasFinales } = columnasComunesActivas(categoriaDoc);
   const columnasAtributos = construirColumnasAtributos(categoriaDoc.campos || []);
+  const columnasFijas = [columnaNo(numeroPorId), ...COLUMNAS_FIJAS()];
 
   if (columnasAtributos.length === 0) {
-    return [[...COLUMNAS_FIJAS(), ...comunesActivos, ...columnasFinales]];
+    return [[...columnasFijas, ...comunesActivos, ...columnasFinales]];
   }
 
-  const anchoBase = sumaAnchos(COLUMNAS_FIJAS()) + sumaAnchos(comunesActivos) + sumaAnchos(columnasFinales);
+  const anchoBase = sumaAnchos(columnasFijas) + sumaAnchos(comunesActivos) + sumaAnchos(columnasFinales);
   const anchoIdentidad = sumaAnchos(COLUMNAS_IDENTIDAD_CONTINUACION());
 
   const grupos = [];
@@ -125,7 +137,7 @@ function construirGruposColumnas(categoriaDoc, anchoDisponible) {
 
     grupos.push(
       esPrimerGrupo
-        ? [...COLUMNAS_FIJAS(), ...comunesActivos, ...lote, ...columnasFinales]
+        ? [...columnasFijas, ...comunesActivos, ...lote, ...columnasFinales]
         : [...COLUMNAS_IDENTIDAD_CONTINUACION(), ...lote]
     );
     esPrimerGrupo = false;
@@ -173,6 +185,8 @@ async function exportCatalogPdf(req, res, next) {
       return fail(res, 'No hay registros que coincidan con los filtros indicados', 404);
     }
 
+    const numeroPorId = new Map(registros.map((r, i) => [String(r._id), i + 1]));
+
     await registrarAuditoria({
       accion: ACCIONES_AUDITORIA.EXPORTAR,
       entidad: 'Catalog',
@@ -219,7 +233,7 @@ async function exportCatalogPdf(req, res, next) {
       doc.moveDown(0.3);
 
       const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const gruposColumnas = construirGruposColumnas(categoriaDoc, anchoDisponible);
+      const gruposColumnas = construirGruposColumnas(categoriaDoc, anchoDisponible, numeroPorId);
       drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas });
       doc.moveDown(1);
     }

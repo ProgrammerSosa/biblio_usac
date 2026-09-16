@@ -342,7 +342,18 @@ export default function CatalogListPage() {
   const filas = agruparRegistros(registros);
   const borradoresEnPagina = filas.filter((f) => f.copias.length === 1 && !f.copias[0].enviado).map((f) => f.copias[0]);
 
+  // Numero de control: 1, 2, 3... segun el orden que se ve en pantalla (Ordenar por
+  // incluido), continuando de una pagina a la siguiente en vez de reiniciar en 1.
+  // Es solo para llevar la cuenta de cuantos van - no se guarda en la base de datos,
+  // por eso no lo mueve el No. de Inventario (que puede quedar vacio).
+  const numeroPorId = new Map(filas.map((fila, indice) => [fila._id, (page - 1) * 15 + indice + 1]));
+
   const columns = [
+    {
+      key: 'no',
+      header: 'No.',
+      render: (row) => numeroPorId.get(row._id),
+    },
     ...(borradoresEnPagina.length > 0
       ? [
           {
