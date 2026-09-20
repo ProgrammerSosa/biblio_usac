@@ -1,5 +1,4 @@
-const INTERVALO_MS = 12 * 60 * 1000; // 12 min, por debajo del limite de inactividad de Render (15 min)
-const TIMEOUT_MS = 15 * 1000;
+const INTERVALO_MS = 10 * 60 * 1000; // 10 min, por debajo del limite de inactividad de Render (15 min)
 
 /**
  * En el plan gratuito de Render, el servicio se duerme tras 15 min sin peticiones entrantes.
@@ -8,34 +7,16 @@ const TIMEOUT_MS = 15 * 1000;
  * (Render la define automaticamente) - en local o en otro proveedor no hace nada.
  */
 function startKeepAlive() {
-  const baseUrl = process.env.RENDER_EXTERNAL_URL;
-  if (!baseUrl) return null;
+  const url = process.env.RENDER_EXTERNAL_URL;
+  if (!url) return;
 
-  const healthUrl = `${baseUrl.replace(/\/$/, '')}/health`;
-  let pingInFlight = false;
-
-  const ping = async () => {
-    if (pingInFlight) return;
-
-    pingInFlight = true;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-    try {
-      await fetch(healthUrl, { signal: controller.signal });
-    } catch {
+  setInterval(() => {
+    fetch(`${url}/health`).catch(() => {
       // Un ping fallido no es grave: el siguiente intento lo vuelve a hacer.
-    } finally {
-      clearTimeout(timeout);
-      pingInFlight = false;
-    }
-  };
+    });
+  }, INTERVALO_MS);
 
-  const timer = setInterval(ping, INTERVALO_MS);
-  timer.unref?.();
-
-  console.log(`Keep-alive activo: ping a ${healthUrl} cada ${INTERVALO_MS / 60000} min`);
-  return () => clearInterval(timer);
+  console.log(`Keep-alive activo: ping a ${url}/health cada ${INTERVALO_MS / 60000} min`);
 }
 
 module.exports = { startKeepAlive };
