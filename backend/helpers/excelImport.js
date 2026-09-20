@@ -79,7 +79,7 @@ function valorCelda(cell) {
   if (cell === null || cell === undefined) return '';
   if (typeof cell === 'object') {
     // Texto con formato mixto dentro de una misma celda (ej. una palabra en negrita) - Excel
-    // lo guarda como varios "runs" en vez de un solo texto plano. Sin esto, el objeto crudo
+    // lo guarda como varios "runs" en vez de un solo texto pl. Sin esto, el objeto crudo
     // llega hasta la base de datos y se guarda literal como "[object Object]", o revienta la
     // validacion (los campos de texto no aceptan un objeto).
     if (Array.isArray(cell.richText)) return cell.richText.map((run) => run.text || '').join('');

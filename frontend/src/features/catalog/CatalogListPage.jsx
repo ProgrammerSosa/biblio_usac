@@ -5,7 +5,7 @@ import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
 import { useCategories } from '../../shared/hooks/useCategories';
-import { ESTADOS_REVISION, ESTADO_REVISION_LABELS, ROLES, tieneDanoFisico } from '../../shared/constants';
+import { ESTADOS_REVISION, ESTADO_REVISION_LABELS, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import EstadoRevisionBadge from '../../shared/components/EstadoRevisionBadge';
 import Badge from '../../shared/components/Badge';
@@ -194,6 +194,7 @@ export default function CatalogListPage() {
   const [page, setPage] = useState(1);
   const [categoria, setCategoria] = useState('');
   const [estadoRevision, setEstadoRevision] = useState('');
+  const [sort, setSort] = useState(ORDEN_POR_DEFECTO);
   const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
   const [soloMios, setSoloMios] = useState(user?.rol === ROLES.USER);
@@ -211,7 +212,7 @@ export default function CatalogListPage() {
     setLoading(true);
     setError('');
     try {
-      const params = { page, limit: 15 };
+      const params = { page, limit: 15, sort };
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
       if (soloMios) params.registradoPor = user?.id;
@@ -238,7 +239,7 @@ export default function CatalogListPage() {
     cargar();
     setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoria, estadoRevision, soloMios, buscar]);
+  }, [page, categoria, estadoRevision, soloMios, buscar, sort]);
 
   async function confirmarEliminar() {
     if (!itemAEliminar) return;
@@ -305,7 +306,7 @@ export default function CatalogListPage() {
     setExportando(true);
     setError('');
     try {
-      const params = {};
+      const params = { sort };
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
       if (soloMios) params.registradoPor = user?.id;
@@ -341,7 +342,18 @@ export default function CatalogListPage() {
   const filas = agruparRegistros(registros);
   const borradoresEnPagina = filas.filter((f) => f.copias.length === 1 && !f.copias[0].enviado).map((f) => f.copias[0]);
 
+  // Numero de control: 1, 2, 3... segun el orden que se ve en pantalla (Ordenar por
+  // incluido), continuando de una pagina a la siguiente en vez de reiniciar en 1.
+  // Es solo para llevar la cuenta de cuantos van - no se guarda en la base de datos,
+  // por eso no lo mueve el No. de Inventario (que puede quedar vacio).
+  const numeroPorId = new Map(filas.map((fila, indice) => [fila._id, (page - 1) * 15 + indice + 1]));
+
   const columns = [
+    {
+      key: 'no',
+      header: 'No.',
+      render: (row) => numeroPorId.get(row._id),
+    },
     ...(borradoresEnPagina.length > 0
       ? [
           {
@@ -420,7 +432,7 @@ export default function CatalogListPage() {
         if (conDano.length > 0) {
           return (
             <Badge tone="danger" icon={AlertTriangle}>
-              {conDano.length} de {row.copias.length} con dano
+              {conDano.length} de {row.copias.length} con daño
             </Badge>
           );
         }
@@ -562,6 +574,20 @@ export default function CatalogListPage() {
           {Object.values(ESTADOS_REVISION).map((estado) => (
             <option key={estado} value={estado}>
               {ESTADO_REVISION_LABELS[estado]}
+            </option>
+          ))}
+        </Select>
+        <Select
+          value={sort}
+          onChange={(e) => {
+            setPage(1);
+            setSort(e.target.value);
+          }}
+          className="max-w-xs"
+        >
+          {OPCIONES_ORDEN_CATALOGO.map((opcion) => (
+            <option key={opcion.value} value={opcion.value}>
+              Ordenar por: {opcion.label}
             </option>
           ))}
         </Select>

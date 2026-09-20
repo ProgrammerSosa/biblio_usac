@@ -15,7 +15,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ROL_LABELS } from '../constants';
 import { CategoriesProvider } from '../CategoriesContext';
 
-const MANUAL_SISTEMA_URL = 'https://claude.ai/code/artifact/c7e229c5-37bf-4a9b-93a3-fbd561e2b9eb';
+const MANUAL_SISTEMA_URL = 'https://claude.ai/artifact/5wi8JDk8GmNKjJdzVxumKP';
 
 const NAV_ITEMS = [
   { to: '/catalogo', label: 'Catalogo', icon: BookOpen, roles: ['MANAGER', 'ADMIN', 'USER'] },
@@ -26,7 +26,7 @@ const NAV_ITEMS = [
   { to: '/personal', label: 'Personal', icon: Users, roles: ['MANAGER'] },
   {
     href: MANUAL_SISTEMA_URL,
-    label: 'Manual del sistema (IA)',
+    label: 'Manual del sistema Generado por IA',
     icon: BookMarked,
     roles: ['MANAGER', 'ADMIN', 'USER'],
     external: true,

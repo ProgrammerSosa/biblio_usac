@@ -17,7 +17,7 @@ const CAMPO_VACIO = () => ({ etiqueta: '', requerido: true });
 const CAMPOS_COMUNES_FIJOS = ['No. de Inventario', 'Autor', 'Titulo'];
 const CAMPOS_COMUNES_OPCIONALES = [
   { clave: 'idioma', etiqueta: 'Idioma' },
-  { clave: 'anio', etiqueta: 'Ano' },
+  { clave: 'anio', etiqueta: 'Año' },
   { clave: 'edicion', etiqueta: 'Edicion' },
   { clave: 'lugar', etiqueta: 'Lugar' },
   { clave: 'paginasImpresas', etiqueta: 'Paginas impresas' },

@@ -5,7 +5,7 @@ import { catalogApi } from '../catalog/catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
 import { useCategories } from '../../shared/hooks/useCategories';
-import { ESTADOS_REVISION, ROLES, tieneDanoFisico } from '../../shared/constants';
+import { ESTADOS_REVISION, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
 import Tabs from '../../shared/components/Tabs';
@@ -13,7 +13,7 @@ import Button from '../../shared/components/Button';
 import Pagination from '../../shared/components/Pagination';
 import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
-import { Textarea } from '../../shared/components/FormField';
+import { Textarea, Select } from '../../shared/components/FormField';
 import CatalogDetailFields from '../catalog/CatalogDetailFields';
 
 const TABS = [
@@ -48,6 +48,7 @@ export default function ApprovalsPage() {
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState(ORDEN_POR_DEFECTO);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
@@ -77,7 +78,7 @@ export default function ApprovalsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await catalogApi.list({ estadoRevision: activeTab, page, limit: 15 });
+      const res = await catalogApi.list({ estadoRevision: activeTab, page, limit: 15, sort });
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
     } catch (err) {
@@ -91,7 +92,7 @@ export default function ApprovalsPage() {
     cargar();
     setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, page]);
+  }, [activeTab, page, sort]);
 
   function toggleUno(id) {
     setSeleccionados((prev) => {
@@ -247,14 +248,30 @@ export default function ApprovalsPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Aprobaciones</h1>
 
-      <Tabs
-        tabs={TABS}
-        active={activeTab}
-        onChange={(value) => {
-          setActiveTab(value);
-          setPage(1);
-        }}
-      />
+      <div className="flex items-center justify-between">
+        <Tabs
+          tabs={TABS}
+          active={activeTab}
+          onChange={(value) => {
+            setActiveTab(value);
+            setPage(1);
+          }}
+        />
+        <Select
+          value={sort}
+          onChange={(e) => {
+            setPage(1);
+            setSort(e.target.value);
+          }}
+          className="max-w-xs"
+        >
+          {OPCIONES_ORDEN_CATALOGO.map((opcion) => (
+            <option key={opcion.value} value={opcion.value}>
+              Ordenar por: {opcion.label}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <AlertBanner>{error}</AlertBanner>
       <AlertBanner type="success">{mensaje}</AlertBanner>

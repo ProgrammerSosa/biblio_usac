@@ -22,8 +22,8 @@ function StatTile({ icon: Icon, label, value, detalle }) {
 
 function formatearFecha(fechaIso) {
   if (!fechaIso) return null;
-  const [anio, mes, dia] = fechaIso.split('-');
-  return new Date(Number(anio), Number(mes) - 1, Number(dia)).toLocaleDateString('es-GT', {
+  const [año, mes, dia] = fechaIso.split('-');
+  return new Date(Number(año), Number(mes) - 1, Number(dia)).toLocaleDateString('es-GT', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',

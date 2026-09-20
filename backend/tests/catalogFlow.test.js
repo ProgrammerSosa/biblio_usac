@@ -57,7 +57,7 @@ function libroValido(noInventario) {
     noInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
-    idioma: 'Espanol',
+    idioma: 'Español',
     anio: '2020',
     edicion: '1ra',
     lugar: 'Guatemala',
@@ -77,7 +77,7 @@ function revistaValida(noInventario) {
     noInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
-    idioma: 'Espanol',
+    idioma: 'Español',
     anio: '2020',
     edicion: '1ra',
     lugar: 'Guatemala',
@@ -97,7 +97,7 @@ function diccionarioValido(noInventario) {
     noInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
-    idioma: 'Espanol',
+    idioma: 'Español',
     anio: '2020',
     edicion: '1ra',
     lugar: 'Guatemala',
@@ -505,5 +505,43 @@ describe('Correccion de registros por Admin/Manager', () => {
       .send({ autor: 'Intento de edicion' });
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe('Ordenamiento del catalogo (parametro sort)', () => {
+  test('sort=titulo_asc alfabetiza sin importar mayusculas ni acentos', async () => {
+    await crearYEnviar(adminToken, { ...libroValido('ORD-1'), titulo: 'banco de datos' });
+    await crearYEnviar(adminToken, { ...libroValido('ORD-2'), titulo: 'Ábaco antiguo' });
+    await crearYEnviar(adminToken, { ...libroValido('ORD-3'), titulo: 'Cielo abierto' });
+
+    const res = await api(app).get('/api/catalog?sort=titulo_asc&limit=50').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    const titulos = res.body.data.registros.map((r) => r.titulo);
+    const indice = (t) => titulos.indexOf(t);
+    // Sin la collation en español, Mongo pondria "Cielo abierto" (mayuscula) antes que
+    // "banco de datos" (minuscula) por orden de codigo Unicode, no alfabetico real.
+    expect(indice('Ábaco antiguo')).toBeLessThan(indice('banco de datos'));
+    expect(indice('banco de datos')).toBeLessThan(indice('Cielo abierto'));
+  });
+
+  test('sort=anio_asc ordena del anio mas antiguo al mas nuevo', async () => {
+    await crearYEnviar(adminToken, { ...libroValido('ORD-4'), anio: '2010' });
+    await crearYEnviar(adminToken, { ...libroValido('ORD-5'), anio: '1990' });
+    await crearYEnviar(adminToken, { ...libroValido('ORD-6'), anio: '2020' });
+
+    const res = await api(app).get('/api/catalog?sort=anio_asc&limit=50').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.registros.map((r) => r.anio)).toEqual(['1990', '2010', '2020']);
+  });
+
+  test('un valor de sort desconocido no rompe la peticion (cae al orden por defecto)', async () => {
+    await crearYEnviar(adminToken, libroValido('ORD-7'));
+
+    const res = await api(app).get('/api/catalog?sort=algoQueNoExiste').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.registros).toHaveLength(1);
   });
 });

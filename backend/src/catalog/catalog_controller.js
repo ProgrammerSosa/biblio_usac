@@ -5,6 +5,7 @@ const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
 const { escapeRegExp } = require('../../helpers/regex');
 const { previsualizarWorkbook, normalizarTexto, MARCADORES_SIN_DATO } = require('../../helpers/excelImport');
+const { resolverOrden } = require('../../helpers/catalogSort');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
 const CAMPOS_EDITABLES = [
@@ -118,7 +119,7 @@ function filtroVisibilidadBorradores(userId) {
 
 async function listItems(req, res, next) {
   try {
-    const { estadoRevision, categoria, registradoPor, buscar, page = 1, limit = 20 } = req.query;
+    const { estadoRevision, categoria, registradoPor, buscar, sort, page = 1, limit = 20 } = req.query;
 
     const filtro = { eliminado: false };
     if (estadoRevision) filtro.estadoRevision = estadoRevision;
@@ -134,16 +135,17 @@ async function listItems(req, res, next) {
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
+    const { sort: sortSpec, collation } = resolverOrden(sort);
 
-    const [registros, total] = await Promise.all([
-      Catalog.find(filtroFinal)
-        .populate('registradoPor', 'nombre email')
-        .populate('revisadoPorAdmin', 'nombre email')
-        .sort({ createdAt: -1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum),
-      Catalog.countDocuments(filtroFinal),
-    ]);
+    const consulta = Catalog.find(filtroFinal)
+      .populate('registradoPor', 'nombre email')
+      .populate('revisadoPorAdmin', 'nombre email')
+      .sort(sortSpec)
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+    if (collation) consulta.collation(collation);
+
+    const [registros, total] = await Promise.all([consulta, Catalog.countDocuments(filtroFinal)]);
 
     return ok(res, {
       registros,
