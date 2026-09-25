@@ -120,7 +120,7 @@ async function listItems(req, res, next) {
       const textoBuscado = buscar.trim();
       const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
       const opciones = [{ titulo: patron }, { autor: patron }];
-      // El ID de inventario es numerico (1001, 1002...); si lo que se busca es un numero
+      // El ID de inventario es numerico (10001, 10002...); si lo que se busca es un numero
       // entero, tambien se compara contra ese campo para poder encontrar un ejemplar por su ID.
       if (/^\d+$/.test(textoBuscado)) {
         opciones.push({ idInventario: parseInt(textoBuscado, 10) });

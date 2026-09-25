@@ -7,6 +7,7 @@ const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants')
 const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
 const { resolverOrden } = require('../../helpers/catalogSort');
 const { escapeRegExp } = require('../../helpers/regex');
+const { claveDeGrupo } = require('../../helpers/catalogGroup');
 const { fail } = require('../../utils/httpResponse');
 
 const ESTADO_LABELS = {
@@ -32,24 +33,50 @@ const FUENTE_ATRIBUTO = 'Helvetica';
 const TAMANO_ATRIBUTO = 8;
 const PADDING_ATRIBUTO = 4;
 
-// La celda ID alterna de fondo azul/rojo palido segun la posicion del registro dentro de la
-// tabla de esa categoria (1ro azul, 2do rojo palido, 3ro azul...) para separar visualmente un
-// registro del siguiente. Se dibuja aparte (ver idColumn en pdfTable.js/drawTable), como una
-// sola casilla que abarca toda la altura del bloque del registro (fila principal + fila de
-// continuacion si la tiene), no como una columna mas de la fila principal.
-const COLOR_ID_IMPAR = { fondo: '#dbeafe', texto: '#1e3a8a' };
-const COLOR_ID_PAR = { fondo: '#fecaca', texto: '#7f1d1d' };
-const colorIdDe = (indice) => (indice % 2 === 0 ? COLOR_ID_IMPAR : COLOR_ID_PAR);
+// La celda ID se colorea segun si el registro es el primer ejemplar detectado de su material
+// o una copia de uno que ya aparecio antes (misma regla de "son copias" que ya usa Catalogo y
+// el import de Excel - ver claveDeGrupo). El primer ejemplar de cada material sigue el patron
+// alternado azul/rojo palido; cualquier copia se marca aparte, en amarillo palido, sin
+// importar en que posicion del reporte caiga. Se dibuja aparte (ver idColumn en
+// pdfTable.js/drawTable), como una sola casilla que abarca toda la altura del bloque del
+// registro (fila principal + fila de continuacion si la tiene), no como una columna mas.
+const COLOR_EJEMPLAR_A = { fondo: '#dbeafe', texto: '#1e3a8a' }; // azul
+const COLOR_EJEMPLAR_B = { fondo: '#fecaca', texto: '#7f1d1d' }; // rojo palido
+const COLOR_COPIA = { fondo: '#fef9c3', texto: '#713f12' }; // amarillo palido
+
+// Recorre los registros en el mismo orden en que se van a dibujar y le asigna a cada uno su
+// color: la primera vez que aparece una clave de material es un ejemplar nuevo (alterna entre
+// los 2 colores segun cuantos ejemplares distintos van vistos, sin contar las copias); la
+// segunda vez (y siguientes) que aparece esa misma clave es una copia, siempre amarillo
+// palido. Se calcula una sola vez para todo el reporte, antes de agrupar por categoria.
+function calcularColoresPorRegistro(registros) {
+  const colores = new Map();
+  const clavesVistas = new Set();
+  let contadorEjemplares = 0;
+
+  for (const registro of registros) {
+    const clave = claveDeGrupo(registro);
+    if (clavesVistas.has(clave)) {
+      colores.set(String(registro._id), COLOR_COPIA);
+      continue;
+    }
+    clavesVistas.add(clave);
+    colores.set(String(registro._id), contadorEjemplares % 2 === 0 ? COLOR_EJEMPLAR_A : COLOR_EJEMPLAR_B);
+    contadorEjemplares += 1;
+  }
+
+  return colores;
+}
 
 const ANCHO_ID = 40;
-const COLUMNA_ID = () => ({
+const COLUMNA_ID = (coloresPorRegistro) => ({
   key: 'idInventario',
   header: 'ID',
   width: ANCHO_ID,
   fontSize: 11,
   negrita: true,
-  bgColorFn: (row, indice) => colorIdDe(indice).fondo,
-  colorFn: (row, indice) => colorIdDe(indice).texto,
+  bgColorFn: (row) => (coloresPorRegistro.get(String(row._id)) || COLOR_EJEMPLAR_A).fondo,
+  colorFn: (row) => (coloresPorRegistro.get(String(row._id)) || COLOR_EJEMPLAR_A).texto,
 });
 
 const COLUMNAS_FIJAS = () => [{ key: 'titulo', header: 'Título', width: 140 }, { key: 'autor', header: 'Autor', width: 95 }];
@@ -113,6 +140,35 @@ const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT 
 const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
 const estadoRevisionTexto = (row) => ESTADO_LABELS[row.estadoRevision] || row.estadoRevision;
 const sumaAnchos = (columnas) => columnas.reduce((sum, col) => sum + col.width, 0);
+
+// Leyenda de colores justo debajo de los filtros, con muestras de color de verdad (no solo el
+// nombre) para que quede claro de un vistazo que azul/rojo alternado = ejemplar y amarillo
+// palido = copia, sin tener que adivinar ni perderse al leer la tabla.
+function dibujarLeyendaColores(doc, x, y) {
+  const ladoMuestra = 9;
+  const etiqueta = 'Colores del ID (alterna por material): ';
+
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#475569').text(etiqueta, x, y - 1);
+  let cursorX = x + doc.widthOfString(etiqueta) + 4;
+
+  const items = [
+    { color: COLOR_EJEMPLAR_A.fondo, texto: 'Ejemplar' },
+    { color: COLOR_EJEMPLAR_B.fondo, texto: 'Ejemplar' },
+    { color: COLOR_COPIA.fondo, texto: 'Copia (mismo material, otro ejemplar fisico)' },
+  ];
+
+  doc.font('Helvetica').fontSize(7.5);
+  items.forEach((item) => {
+    doc.rect(cursorX, y, ladoMuestra, ladoMuestra).fill(item.color);
+    doc.strokeColor('#94a3b8').lineWidth(0.5).rect(cursorX, y, ladoMuestra, ladoMuestra).stroke();
+    cursorX += ladoMuestra + 3;
+
+    doc.fillColor('#475569').text(item.texto, cursorX, y - 1);
+    cursorX += doc.widthOfString(item.texto) + 14;
+  });
+
+  return y + ladoMuestra + 6;
+}
 
 function nombreArchivoPdf() {
   const ahora = new Date();
@@ -297,6 +353,7 @@ async function exportCatalogPdf(req, res, next) {
 
     const grupos = agruparPorCategoria(registros);
     const categorias = await Category.find({ clave: { $in: [...grupos.keys()] } }).sort({ nombre: 1 });
+    const coloresPorRegistro = calcularColoresPorRegistro(registros);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoPdf()}"`);
@@ -319,6 +376,8 @@ async function exportCatalogPdf(req, res, next) {
           estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
         }${buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''}  |  Total: ${registros.length}`
       );
+    doc.moveDown(0.4);
+    doc.y = dibujarLeyendaColores(doc, doc.page.margins.left, doc.y);
     doc.moveDown(1);
 
     for (const categoriaDoc of categorias) {
@@ -336,7 +395,7 @@ async function exportCatalogPdf(req, res, next) {
       // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
       const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right - ANCHO_ID;
       const gruposColumnas = construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas);
-      drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas, idColumn: COLUMNA_ID() });
+      drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas, idColumn: COLUMNA_ID(coloresPorRegistro) });
       doc.moveDown(1);
     }
 
@@ -346,4 +405,15 @@ async function exportCatalogPdf(req, res, next) {
   }
 }
 
-module.exports = { exportCatalogPdf, construirGruposColumnas, ANCHO_MIN_ATRIBUTO, ANCHO_MAX_ATRIBUTO, ANCHO_MAX_ESTADO_FISICO, ANCHO_ID };
+module.exports = {
+  exportCatalogPdf,
+  construirGruposColumnas,
+  calcularColoresPorRegistro,
+  ANCHO_MIN_ATRIBUTO,
+  ANCHO_MAX_ATRIBUTO,
+  ANCHO_MAX_ESTADO_FISICO,
+  ANCHO_ID,
+  COLOR_EJEMPLAR_A,
+  COLOR_EJEMPLAR_B,
+  COLOR_COPIA,
+};

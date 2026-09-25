@@ -15,6 +15,7 @@ const catalogRoutes = require('./src/catalog/catalog_routes');
 const categoryRoutes = require('./src/catalog/category_routes');
 const auditRoutes = require('./src/audit/audit_routes');
 const exportRoutes = require('./src/exports/export_routes');
+const backupRoutes = require('./src/backup/backup_routes');
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/catalog', catalogRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/exports', exportRoutes);
+app.use('/api/backup', backupRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'Ruta no encontrada' });

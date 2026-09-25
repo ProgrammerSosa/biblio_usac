@@ -401,7 +401,7 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
     expect(res.body.data.idInventario).toBeUndefined();
   });
 
-  test('al aprobar un registro se le asigna el primer ID disponible (1001)', async () => {
+  test('al aprobar un registro se le asigna el primer ID disponible (10001)', async () => {
     const creado = await crearYEnviar(userToken, libroValido());
 
     const res = await api(app)
@@ -410,7 +410,7 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .send({ decision: 'APROBAR' });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.idInventario).toBe(1001);
+    expect(res.body.data.idInventario).toBe(10001);
   });
 
   test('cada aprobacion siguiente recibe el proximo numero, en orden', async () => {
@@ -426,8 +426,8 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ decision: 'APROBAR' });
 
-    expect(resUno.body.data.idInventario).toBe(1001);
-    expect(resDos.body.data.idInventario).toBe(1002);
+    expect(resUno.body.data.idInventario).toBe(10001);
+    expect(resDos.body.data.idInventario).toBe(10002);
   });
 
   test('rechazar un registro NO le asigna ID de inventario', async () => {
@@ -455,7 +455,7 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
     expect(res.body.data.aprobados).toBe(2);
 
     const registros = await Catalog.find({ _id: { $in: [uno.body.data._id, dos.body.data._id] } });
-    expect(registros.map((r) => r.idInventario).sort()).toEqual([1001, 1002]);
+    expect(registros.map((r) => r.idInventario).sort()).toEqual([10001, 10002]);
   });
 
   test('si la Manager vuelve a guardar un registro ya Aprobado, no le reasigna otro ID', async () => {
@@ -471,7 +471,7 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .send({ autor: 'Autor Corregido' });
 
     expect(editado.status).toBe(200);
-    expect(editado.body.data.idInventario).toBe(1001);
+    expect(editado.body.data.idInventario).toBe(10001);
   });
 
   test('se puede buscar un registro aprobado por su ID de inventario', async () => {
@@ -481,7 +481,7 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ decision: 'APROBAR' });
 
-    const res = await api(app).get('/api/catalog?buscar=1001').set('Authorization', `Bearer ${adminToken}`);
+    const res = await api(app).get('/api/catalog?buscar=10001').set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.registros.map((r) => r.titulo)).toContain('Buscable por ID');

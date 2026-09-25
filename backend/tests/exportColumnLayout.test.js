@@ -14,10 +14,14 @@ const { ROLES, ESTADOS_REVISION } = require('../utils/constants');
 const { CATEGORIAS_POR_DEFECTO } = require('../scripts/seed');
 const {
   construirGruposColumnas,
+  calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,
   ANCHO_MAX_ATRIBUTO,
   ANCHO_MAX_ESTADO_FISICO,
   ANCHO_ID,
+  COLOR_EJEMPLAR_A,
+  COLOR_EJEMPLAR_B,
+  COLOR_COPIA,
 } = require('../src/exports/export_controller');
 
 // Este archivo verifica que el reparto de columnas del PDF (helpers/pdfTable.js +
@@ -293,5 +297,88 @@ describe('El reparto de columnas del PDF funciona igual para cualquier categoria
     const columnaEstadoFisico = grupos.flat().find((c) => c.header === 'Estado físico');
     expect(columnaEstadoFisico).toBeDefined();
     expect(columnaEstadoFisico.width).toBeLessThanOrEqual(ANCHO_MAX_ESTADO_FISICO + 0.01);
+  });
+});
+
+describe('Color de la columna ID: primer ejemplar vs copias', () => {
+  async function crearMaterial(categoriaDoc, datosBase, estadosFisicos) {
+    const registros = [];
+    for (const estadoFisico of estadosFisicos) {
+      const registro = await Catalog.create({
+        ...datosBase,
+        categoria: categoriaDoc.clave,
+        estadoFisico,
+        estadoRevision: ESTADOS_REVISION.APROBADO,
+        enviado: true,
+        registradoPor: manager._id,
+      });
+      registros.push(registro);
+    }
+    return registros;
+  }
+
+  test('el primer ejemplar de cada material alterna azul/rojo palido; cualquier copia (misma obra, distinto estado fisico) es amarillo palido, sin importar la posicion', async () => {
+    const categoriaDoc = await Category.findOne({ clave: 'DICCIONARIO' });
+    const datosLibroA = {
+      autor: 'Autor Libro A',
+      titulo: 'Libro A',
+      idioma: 'Español',
+      anio: '2020',
+      edicion: '1ra',
+      lugar: 'Guatemala',
+      paginasImpresas: 100,
+      atributos: { EDITORIAL: 'Editorial X' },
+    };
+    const datosLibroB = { ...datosLibroA, autor: 'Autor Libro B', titulo: 'Libro B' };
+    const datosLibroC = { ...datosLibroA, autor: 'Autor Libro C', titulo: 'Libro C' };
+
+    // Orden en que quedarian en el reporte: A (ejemplar), A (copia), B (ejemplar), A (otra
+    // copia mas), C (ejemplar). Las copias de A no deberian "gastar" un turno del alternado
+    // azul/rojo - ese alternado es solo entre A, B y C (los 3 materiales distintos).
+    const [ejemplarA, copiaA1] = await crearMaterial(categoriaDoc, datosLibroA, ['Buen estado', 'Regular']);
+    const [ejemplarB] = await crearMaterial(categoriaDoc, datosLibroB, ['Buen estado']);
+    const [copiaA2] = await crearMaterial(categoriaDoc, datosLibroA, ['Hojas manchadas']);
+    const [ejemplarC] = await crearMaterial(categoriaDoc, datosLibroC, ['Buen estado']);
+
+    const registrosEnOrden = [ejemplarA, copiaA1, ejemplarB, copiaA2, ejemplarC];
+    const colores = calcularColoresPorRegistro(registrosEnOrden);
+
+    expect(colores.get(String(ejemplarA._id))).toBe(COLOR_EJEMPLAR_A);
+    expect(colores.get(String(copiaA1._id))).toBe(COLOR_COPIA);
+    expect(colores.get(String(copiaA2._id))).toBe(COLOR_COPIA);
+    // B es el 2do material distinto (A fue el 1ro) -> le toca el otro color del patron.
+    expect(colores.get(String(ejemplarB._id))).toBe(COLOR_EJEMPLAR_B);
+    // C es el 3er material distinto -> vuelve a azul, sin importar cuantas copias de A hubo
+    // en el medio.
+    expect(colores.get(String(ejemplarC._id))).toBe(COLOR_EJEMPLAR_A);
+  });
+
+  test('exportar un catalogo con copias reales no se rompe y produce un PDF valido', async () => {
+    const categoriaDoc = await Category.findOne({ clave: 'DICCIONARIO' });
+    const datos = {
+      autor: 'Autor Con Copias',
+      titulo: 'Libro Con Copias Reales',
+      idioma: 'Español',
+      anio: '2020',
+      edicion: '1ra',
+      lugar: 'Guatemala',
+      paginasImpresas: 100,
+      atributos: { EDITORIAL: 'Editorial Y' },
+    };
+    await crearMaterial(categoriaDoc, datos, ['Buen estado', 'Regular', 'Hojas manchadas']);
+
+    const res = await api(app)
+      .get('/api/exports/catalog?categoria=DICCIONARIO')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.body.length).toBeGreaterThan(0);
   });
 });

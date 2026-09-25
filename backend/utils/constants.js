@@ -29,6 +29,7 @@ const ACCIONES_AUDITORIA = Object.freeze({
   ACTIVAR_USUARIO: 'ACTIVAR_USUARIO',
   DESACTIVAR_CATEGORIA: 'DESACTIVAR_CATEGORIA',
   ACTIVAR_CATEGORIA: 'ACTIVAR_CATEGORIA',
+  RESTAURAR_RESPALDO: 'RESTAURAR_RESPALDO',
 });
 
 const PALABRAS_DANO = ['dañ', 'dani', 'humedad', 'mancha', 'rasgad', 'roto', 'rota', 'deteriorad', 'polilla', 'hongo'];

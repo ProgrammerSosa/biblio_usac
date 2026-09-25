@@ -12,6 +12,7 @@ import PersonnelPage from '../features/users/PersonnelPage';
 import CategoriesPage from '../features/categories/CategoriesPage';
 import TeamPage from '../features/team/TeamPage';
 import ProfilePage from '../features/team/ProfilePage';
+import BackupPage from '../features/backup/BackupPage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <RootRedirect /> },
@@ -41,6 +42,7 @@ export const router = createBrowserRouter([
             children: [
               { path: '/personal', element: <PersonnelPage /> },
               { path: '/categorias', element: <CategoriesPage /> },
+              { path: '/respaldo', element: <BackupPage /> },
             ],
           },
         ],

@@ -10,7 +10,7 @@ const catalogSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
-    // Ya no se escribe a mano: se asigna solo, en orden (1001, 1002, 1003...), la primera
+    // Ya no se escribe a mano: se asigna solo, en orden (10001, 10002, 10003...), la primera
     // vez que el registro queda Aprobado (ver helpers/idInventario.js) - un registro que
     // sigue Pendiente o fue Rechazado todavia no tiene. "sparse" permite que todos esos
     // queden sin valor a la vez, sin romper la unicidad entre los que si ya lo tienen.
