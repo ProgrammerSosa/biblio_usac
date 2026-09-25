@@ -119,10 +119,7 @@ export default function BackupPage() {
       <div className="rounded-lg border border-border bg-white p-5">
         <h2 className="mb-1 text-sm font-semibold text-primary-dark">Guardar respaldo</h2>
         <p className="mb-3 max-w-2xl text-sm text-slate-500">
-          Descarga un Excel con todo el catalogo y las categorias tal como estan ahora mismo. Guardalo en un lugar
-          seguro (USB, Drive, correo, etc.) - no se guarda ninguna copia en el servidor ni en la base de datos, asi
-          que si lo pierdes no hay forma de recuperarlo desde aqui. Nadie lo genera por ti ni en automatico: hazlo
-          cuando quieras tener un punto al que volver.
+          Descarga un Excel .
         </p>
         <Button icon={Download} onClick={handleExportar} disabled={exportando}>
           {exportando ? 'Generando...' : 'Guardar respaldo (Excel)'}
@@ -132,9 +129,7 @@ export default function BackupPage() {
       <div className="rounded-lg border border-border bg-white p-5">
         <h2 className="mb-1 text-sm font-semibold text-primary-dark">Restaurar respaldo</h2>
         <p className="mb-3 max-w-2xl text-sm text-slate-500">
-          Sube un Excel generado con "Guardar respaldo" para traer de vuelta ese catalogo y esas categorias. Un
-          registro que ya exista se actualiza con los datos del archivo; uno que ya no exista se vuelve a crear tal
-          como estaba, con su mismo ID. Usalo solo si algo se perdio o se dañó - no hace falta para el uso diario.
+          Sube un Excel generado con "Guardar respaldo".
         </p>
         <input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={(e) => elegirArchivo(e.target.files)} className="hidden" />
         <Button variant="secondary" icon={Upload} onClick={() => inputRef.current?.click()}>
