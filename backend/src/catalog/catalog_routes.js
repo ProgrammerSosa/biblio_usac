@@ -9,6 +9,7 @@ const {
   updateOwnItem,
   revisarMaterial,
   aprobarLote,
+  rechazarLote,
   enviarLote,
   previsualizarImportacion,
   confirmarImportacion,
@@ -35,6 +36,7 @@ router.use(verifyJWT);
 router.get('/', listItems);
 router.post('/', createItem);
 router.patch('/aprobar-lote', checkRole(ROLES.ADMIN, ROLES.MANAGER), aprobarLote);
+router.patch('/rechazar-lote', checkRole(ROLES.ADMIN, ROLES.MANAGER), rechazarLote);
 router.patch('/enviar-lote', enviarLote);
 router.post('/importar', upload.single('archivo'), previsualizarImportacion);
 router.post('/importar/confirmar', confirmarImportacion);

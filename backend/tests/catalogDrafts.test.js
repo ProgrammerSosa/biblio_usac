@@ -64,21 +64,27 @@ describe('Modo borrador: un registro nuevo solo lo ve su autor hasta que se envi
   test('el autor SI ve su propio borrador en el listado', async () => {
     await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('BOR-002'));
 
-    const res = await api(app).get('/api/catalog?buscar=BOR-002').set('Authorization', `Bearer ${auxiliar1Token}`);
+    const res = await api(app)
+      .get('/api/catalog?buscar=Titulo Borrador de Prueba')
+      .set('Authorization', `Bearer ${auxiliar1Token}`);
     expect(res.body.data.registros).toHaveLength(1);
   });
 
   test('otro Auxiliar NO ve el borrador ajeno', async () => {
     await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('BOR-003'));
 
-    const res = await api(app).get('/api/catalog?buscar=BOR-003').set('Authorization', `Bearer ${auxiliar2Token}`);
+    const res = await api(app)
+      .get('/api/catalog?buscar=Titulo Borrador de Prueba')
+      .set('Authorization', `Bearer ${auxiliar2Token}`);
     expect(res.body.data.registros).toHaveLength(0);
   });
 
   test('el Manager tampoco ve el borrador ajeno', async () => {
     await api(app).post('/api/catalog').set('Authorization', `Bearer ${auxiliar1Token}`).send(libro('BOR-004'));
 
-    const res = await api(app).get('/api/catalog?buscar=BOR-004').set('Authorization', `Bearer ${managerToken}`);
+    const res = await api(app)
+      .get('/api/catalog?buscar=Titulo Borrador de Prueba')
+      .set('Authorization', `Bearer ${managerToken}`);
     expect(res.body.data.registros).toHaveLength(0);
   });
 
@@ -120,7 +126,9 @@ describe('PATCH /api/catalog/enviar-lote', () => {
     expect(envio.status).toBe(200);
     expect(envio.body.data.enviados).toBe(1);
 
-    const res = await api(app).get('/api/catalog?buscar=ENV-001').set('Authorization', `Bearer ${managerToken}`);
+    const res = await api(app)
+      .get('/api/catalog?buscar=Titulo Borrador de Prueba')
+      .set('Authorization', `Bearer ${managerToken}`);
     expect(res.body.data.registros).toHaveLength(1);
 
     const auditoria = await Audit.find({ entidadId: creado.body.data._id }).sort({ fecha: 1 });

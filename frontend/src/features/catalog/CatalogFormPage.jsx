@@ -12,7 +12,6 @@ import AlertBanner from '../../shared/components/AlertBanner';
 
 const CAMPOS_COMUNES_INICIALES = {
   categoria: '',
-  noInventario: '',
   autor: '',
   titulo: '',
   idioma: '',
@@ -53,7 +52,6 @@ export default function CatalogFormPage() {
         const item = res.data.data;
         setForm({
           categoria: item.categoria || '',
-          noInventario: item.noInventario || '',
           autor: item.autor || '',
           titulo: item.titulo || '',
           idioma: item.idioma || '',
@@ -141,29 +139,16 @@ export default function CatalogFormPage() {
         </h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              label="Categoria"
-              required
-              value={form.categoria}
-              onChange={(e) => handleChangeCategoria(e.target.value)}
-            >
-              <option value="" disabled>
-                Selecciona una categoria
+          <Select label="Categoria" required value={form.categoria} onChange={(e) => handleChangeCategoria(e.target.value)}>
+            <option value="" disabled>
+              Selecciona una categoria
+            </option>
+            {categoriasDisponibles.map((cat) => (
+              <option key={cat.clave} value={cat.clave}>
+                {cat.nombre}
               </option>
-              {categoriasDisponibles.map((cat) => (
-                <option key={cat.clave} value={cat.clave}>
-                  {cat.nombre}
-                </option>
-              ))}
-            </Select>
-            <Input
-              label="No. de Inventario"
-              required
-              value={form.noInventario}
-              onChange={(e) => handleChange('noInventario', e.target.value)}
-            />
-          </div>
+            ))}
+          </Select>
 
           <div className="grid grid-cols-2 gap-4">
             <Input label="Autor" required value={form.autor} onChange={(e) => handleChange('autor', e.target.value)} />

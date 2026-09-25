@@ -4,23 +4,13 @@ const User = require('../users/user_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
 const { escapeRegExp } = require('../../helpers/regex');
-const { previsualizarWorkbook, normalizarTexto, MARCADORES_SIN_DATO } = require('../../helpers/excelImport');
+const { previsualizarWorkbook } = require('../../helpers/excelImport');
 const { resolverOrden } = require('../../helpers/catalogSort');
+const { siguienteIdInventario } = require('../../helpers/idInventario');
+const { agruparPorCopias } = require('../../helpers/catalogGroup');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
-const CAMPOS_EDITABLES = [
-  'categoria',
-  'noInventario',
-  'autor',
-  'titulo',
-  'idioma',
-  'anio',
-  'edicion',
-  'lugar',
-  'paginasImpresas',
-  'estadoFisico',
-  'atributos',
-];
+const CAMPOS_EDITABLES = ['categoria', 'autor', 'titulo', 'idioma', 'anio', 'edicion', 'lugar', 'paginasImpresas', 'estadoFisico', 'atributos'];
 
 function pickCatalogFields(body) {
   const datos = {};
@@ -29,17 +19,16 @@ function pickCatalogFields(body) {
       datos[campo] = body[campo];
     }
   }
-
-  // "" (o un marcador como "N/A") no es lo mismo que ausente para el indice unique+sparse:
-  // Mongo solo salta el indice cuando el campo no existe en el documento, no cuando vale "" o
-  // "N/A". Sin esto, el primer registro sin numero de inventario se guarda bien, pero el
-  // segundo choca contra el primero como si fuera un No. de Inventario duplicado.
-  if (typeof datos.noInventario === 'string') {
-    const limpio = datos.noInventario.trim();
-    datos.noInventario = limpio && !MARCADORES_SIN_DATO.has(normalizarTexto(limpio)) ? limpio : undefined;
-  }
-
   return datos;
+}
+
+// El ID de inventario ya no se escribe a mano: se asigna solo, en orden, la
+// primera vez que el registro queda Aprobado. Si ya tenia uno (ej. la Manager
+// vuelve a guardar un Aprobado sin cambiar el estado) no se reasigna.
+async function asignarIdInventarioSiHaceFalta(item) {
+  if (item.idInventario === undefined || item.idInventario === null) {
+    item.idInventario = await siguienteIdInventario();
+  }
 }
 
 async function createItem(req, res, next) {
@@ -68,7 +57,7 @@ async function createItem(req, res, next) {
       entidad: 'Catalog',
       entidadId: item._id,
       usuario: req.user.userId,
-      detalles: { categoria: item.categoria, noInventario: item.noInventario },
+      detalles: { categoria: item.categoria },
     });
 
     return created(res, item);
@@ -128,8 +117,15 @@ async function listItems(req, res, next) {
 
     const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
     if (buscar && buscar.trim()) {
-      const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
-      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { noInventario: patron }] });
+      const textoBuscado = buscar.trim();
+      const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
+      const opciones = [{ titulo: patron }, { autor: patron }];
+      // El ID de inventario es numerico (1001, 1002...); si lo que se busca es un numero
+      // entero, tambien se compara contra ese campo para poder encontrar un ejemplar por su ID.
+      if (/^\d+$/.test(textoBuscado)) {
+        opciones.push({ idInventario: parseInt(textoBuscado, 10) });
+      }
+      clausulas.push({ $or: opciones });
     }
     const filtroFinal = { $and: clausulas };
 
@@ -137,21 +133,28 @@ async function listItems(req, res, next) {
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
     const { sort: sortSpec, collation } = resolverOrden(sort);
 
-    const consulta = Catalog.find(filtroFinal)
+    // La paginacion tiene que aplicarse sobre los GRUPOS (un material con sus copias cuenta
+    // como un solo renglon en la tabla), no sobre cada documento suelto - si no, dos copias
+    // del mismo libro podrian caer en paginas distintas segun el orden (ej. una vieja ya
+    // aprobada y una recien agregada), y la tabla ya no las mostraria juntas aunque sean
+    // exactamente lo mismo. Por eso se trae todo lo que coincide con el filtro, ya ordenado,
+    // y la pagina se recorta despues de agrupar.
+    const consultaTodo = Catalog.find(filtroFinal)
       .populate('registradoPor', 'nombre email')
       .populate('revisadoPorAdmin', 'nombre email')
-      .sort(sortSpec)
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum);
-    if (collation) consulta.collation(collation);
+      .sort(sortSpec);
+    if (collation) consultaTodo.collation(collation);
 
-    const [registros, total] = await Promise.all([consulta, Catalog.countDocuments(filtroFinal)]);
+    const todos = await consultaTodo;
+    const grupos = agruparPorCopias(todos);
+    const total = grupos.length;
+    const registros = grupos.slice((pageNum - 1) * limitNum, pageNum * limitNum).flat();
 
     return ok(res, {
       registros,
       total,
       page: pageNum,
-      totalPages: Math.ceil(total / limitNum),
+      totalPages: Math.max(1, Math.ceil(total / limitNum)),
     });
   } catch (err) {
     return next(err);
@@ -252,6 +255,7 @@ async function revisarMaterial(req, res, next) {
 
     if (decision === 'APROBAR') {
       item.estadoRevision = ESTADOS_REVISION.APROBADO;
+      await asignarIdInventarioSiHaceFalta(item);
     } else {
       if (!observaciones) {
         return fail(res, 'Las observaciones son obligatorias al rechazar un registro');
@@ -295,6 +299,7 @@ async function aprobarLote(req, res, next) {
     for (const item of registros) {
       item.estadoRevision = ESTADOS_REVISION.APROBADO;
       item.revisadoPorAdmin = req.user.userId;
+      await asignarIdInventarioSiHaceFalta(item);
       await item.save();
 
       await registrarAuditoria({
@@ -307,6 +312,45 @@ async function aprobarLote(req, res, next) {
     }
 
     return ok(res, { aprobados: registros.length }, `${registros.length} registro(s) aprobado(s)`);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function rechazarLote(req, res, next) {
+  try {
+    const { ids, observaciones } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return fail(res, 'Debes indicar al menos un registro para rechazar');
+    }
+    if (!observaciones || !observaciones.trim()) {
+      return fail(res, 'Las observaciones son obligatorias al rechazar un registro');
+    }
+
+    const registros = await Catalog.find({
+      _id: { $in: ids },
+      eliminado: false,
+      enviado: true,
+      estadoRevision: ESTADOS_REVISION.PENDIENTE,
+    });
+
+    for (const item of registros) {
+      item.estadoRevision = ESTADOS_REVISION.RECHAZADO;
+      item.observaciones = observaciones.trim();
+      item.revisadoPorAdmin = req.user.userId;
+      await item.save();
+
+      await registrarAuditoria({
+        accion: ACCIONES_AUDITORIA.RECHAZAR,
+        entidad: 'Catalog',
+        entidadId: item._id,
+        usuario: req.user.userId,
+        detalles: { estadoNuevo: item.estadoRevision, lote: true },
+      });
+    }
+
+    return ok(res, { rechazados: registros.length }, `${registros.length} registro(s) rechazado(s)`);
   } catch (err) {
     return next(err);
   }
@@ -365,32 +409,19 @@ async function confirmarImportacion(req, res, next) {
       if (categoriasPermitidas && !categoriasPermitidas.includes(item.categoria)) {
         errores.push({
           titulo: item.titulo,
-          noInventario: item.noInventario,
           error: `No tienes permiso para registrar materiales de la categoria ${item.categoria}`,
         });
         continue;
       }
 
+      // "copias" ya viene sumado desde la vista previa (helpers/excelImport.js): cuantas filas
+      // identicas (mismos datos salvo estado fisico) se fusionaron en este item. El ID de
+      // inventario ya no se lee del Excel - se asigna solo cuando cada copia se apruebe.
       const copias = Math.max(1, parseInt(item.copias, 10) || 1);
-      // Si varias filas del Excel se fusionaron en este item por ser el mismo material
-      // (100% igual salvo estado fisico), cada una pudo traer su propio No. de Inventario:
-      // se le asigna a cada copia el suyo, en el mismo orden. Si no hay tantos numeros como
-      // copias, las que sobran quedan sin numero para completarse despues con el fisico real.
-      const noInventarios =
-        Array.isArray(item.noInventarios) && item.noInventarios.length > 0
-          ? item.noInventarios
-          : [item.noInventario].filter(Boolean);
+      const datos = pickCatalogFields(item);
 
       for (let i = 0; i < copias; i++) {
         try {
-          const datos = pickCatalogFields(item);
-          const numeroDeEstaCopia = noInventarios[i];
-          if (numeroDeEstaCopia) {
-            datos.noInventario = numeroDeEstaCopia;
-          } else {
-            delete datos.noInventario;
-          }
-
           // Queda Pendiente (no Aprobado): son datos que vienen de otra fuente y pueden
           // necesitar correccion, asi que igual pasan por revision antes de darse por buenos.
           const registro = await Catalog.create({
@@ -406,13 +437,12 @@ async function confirmarImportacion(req, res, next) {
             entidad: 'Catalog',
             entidadId: registro._id,
             usuario: req.user.userId,
-            detalles: { categoria: registro.categoria, noInventario: registro.noInventario, importado: true },
+            detalles: { categoria: registro.categoria, importado: true },
           });
 
           creados += 1;
         } catch (err) {
-          const mensaje = err.code === 11000 ? 'Ya existe un registro con ese No. de Inventario' : err.message;
-          errores.push({ titulo: item.titulo, noInventario: item.noInventario, error: mensaje });
+          errores.push({ titulo: item.titulo, error: err.message });
         }
       }
     }
@@ -438,7 +468,7 @@ async function deleteItem(req, res, next) {
       entidad: 'Catalog',
       entidadId: item._id,
       usuario: req.user.userId,
-      detalles: { noInventario: item.noInventario },
+      detalles: { idInventario: item.idInventario },
     });
 
     return ok(res, null, 'Registro eliminado correctamente');
@@ -454,6 +484,7 @@ module.exports = {
   updateOwnItem,
   revisarMaterial,
   aprobarLote,
+  rechazarLote,
   enviarLote,
   previsualizarImportacion,
   confirmarImportacion,

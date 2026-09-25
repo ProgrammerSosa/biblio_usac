@@ -34,8 +34,6 @@ const CAMPOS_COMUNES = {
   edicion: 'edicion',
   lugar: 'lugar',
   'paginas impresas': 'paginasImpresas',
-  'no. de inventario': 'noInventario',
-  'no de inventario': 'noInventario',
   'estado fisico': 'estadoFisico',
 };
 
@@ -43,16 +41,14 @@ const CAMPOS_NOTAS = ['notas', 'nota'];
 
 // Columnas que existen en los Excel reales de la biblioteca pero no son un dato del material:
 // se ignoran sin avisar (no tiene sentido pedir que se "creen como atributo de categoria").
-// Ya no se usa un numero de copias declarado a mano: las copias se detectan solas (misma
-// categoria+autor+titulo+edicion+idioma, sin importar el estado fisico). "No." es solo el
-// numero de fila/renglon del Excel, no un dato a guardar.
-const CAMPOS_IGNORADOS = ['copias', 'copia', 'no.', 'no', '#'];
-
-// Cuando no se conoce el No. de Inventario real, en el Excel muchas veces se escribe un
-// marcador de "esto no aplica" en vez de dejar la celda vacia. Para el indice unique+sparse
-// eso SI es un valor real - dos filas con "N/A" chocarian entre si como si fuera el mismo
-// numero repetido. Se tratan igual que una celda vacia (sin numero, completar despues).
-const MARCADORES_SIN_DATO = new Set(['n/a', 'na', 'n.a.', 's/n', 'sin numero', '-', '--']);
+// El No. de Inventario tampoco se lee mas: ahora se asigna solo al aprobar (ver
+// helpers/idInventario.js), asi que esa columna del Excel se ignora igual que "No." (que
+// siempre fue solo el numero de fila/renglon del Excel, nunca un dato a guardar). "Copias"
+// tambien se ignora a proposito: declarar una cantidad a mano genera confusion (¿es el total
+// o lo adicional?) - las copias se detectan solas agrupando filas con los mismos datos (ver
+// claveDeGrupo/agruparPorCopias mas abajo), asi que basta con pegar una fila por ejemplar
+// fisico, igual que antes.
+const CAMPOS_IGNORADOS = ['no.', 'no', '#', 'no. de inventario', 'no de inventario', 'copias', 'copia'];
 
 // Alias para columnas que son "campos propios de categoria" pero cuyo encabezado en Excel
 // no coincide letra por letra con la clave guardada en Category (ej. "Volúmen " -> VOLUMEN).
@@ -119,19 +115,16 @@ function agruparPorCopias(items) {
 
   return [...grupos.values()].map((grupo) => {
     const base = grupo[0];
-    // Si cada fila agrupada traia su propio No. de Inventario (copias fisicas ya numeradas
-    // en el Excel), se conservan todos en orden para que cada copia creada se quede con el
-    // suyo en vez de perderlo al fusionar las filas en un solo item de la vista previa.
-    const noInventarios = grupo.map((i) => i.noInventario).filter(Boolean);
     const errores = [...new Set(grupo.flatMap((i) => i.errores))];
     const camposFaltantes = [...new Set(grupo.flatMap((i) => i.camposFaltantes))];
+    // Cuantas copias en total representa este grupo: cuantas filas del Excel se fusionaron
+    // aqui (una fila = un ejemplar fisico). No hace falta declarar ninguna cantidad a mano.
+    const copias = grupo.length;
 
     return {
       ...base,
       filas: grupo.map((i) => i.fila),
-      noInventario: noInventarios[0],
-      noInventarios,
-      copias: grupo.length,
+      copias,
       errores,
       valido: errores.length === 0,
       camposFaltantes,
@@ -180,7 +173,6 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
 
       const datos = {
         categoria: claveCategoria,
-        noInventario: '',
         autor: '',
         titulo: '',
         idioma: '',
@@ -226,8 +218,6 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
       if (notas) {
         datos.estadoFisico = [datos.estadoFisico, notas].filter(Boolean).join(' - ');
       }
-      const noInventarioTexto = String(datos.noInventario || '').trim();
-      datos.noInventario = noInventarioTexto && !MARCADORES_SIN_DATO.has(normalizarTexto(noInventarioTexto)) ? noInventarioTexto : undefined;
       datos.autor = String(datos.autor || '').trim();
       datos.titulo = String(datos.titulo || '').trim();
 
@@ -265,4 +255,4 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
   return resultado;
 }
 
-module.exports = { previsualizarWorkbook, normalizarTexto, MARCADORES_SIN_DATO };
+module.exports = { previsualizarWorkbook, normalizarTexto };

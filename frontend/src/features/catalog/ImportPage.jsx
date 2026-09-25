@@ -135,9 +135,11 @@ export default function ImportPage() {
       </div>
       <p className="max-w-2xl text-sm text-slate-500">
         Sube el archivo con las hojas Libros, Revistas, Diccionarios, Enciclopedias, Folletos o Publicacion
-        institucional. Primero te muestro lo que se detecto para que revises antes de guardar nada. Las copias se
-        detectan solas: si dos filas tienen el mismo autor, titulo, edicion e idioma (sin importar el estado
-        fisico), se cuentan como copias del mismo material.
+        institucional. Primero te muestro lo que se detecto para que revises antes de guardar nada. Para varias
+        copias del mismo material, agrega una fila por cada ejemplar fisico (una fila = una copia): si el autor,
+        titulo, edicion e idioma coinciden, se agrupan solas como copias del mismo registro, sin importar el
+        estado fisico de cada una. Si mas adelante aparece otro ejemplar identico, se agrega igual. El No. de
+        Inventario ya no se escribe en el Excel: se asigna solo cuando cada ejemplar se aprueba.
       </p>
 
       <AlertBanner>{error}</AlertBanner>
@@ -161,7 +163,7 @@ export default function ImportPage() {
               <ul className="flex flex-col gap-1 text-xs text-slate-600">
                 {resultado.errores.map((e, idx) => (
                   <li key={idx}>
-                    <strong>{e.titulo || 'Sin titulo'}</strong> ({e.noInventario || 'sin no. inventario'}): {e.error}
+                    <strong>{e.titulo || 'Sin titulo'}</strong>: {e.error}
                   </li>
                 ))}
               </ul>
@@ -266,7 +268,6 @@ export default function ImportPage() {
                           <th className="px-3 py-2 font-semibold">Incluir</th>
                           <th className="px-3 py-2 font-semibold">Titulo</th>
                           <th className="px-3 py-2 font-semibold">Autor</th>
-                          <th className="px-3 py-2 font-semibold">No. Inventario</th>
                           <th className="px-3 py-2 font-semibold">Copias</th>
                           <th className="px-3 py-2 font-semibold">Estado</th>
                         </tr>
@@ -291,7 +292,6 @@ export default function ImportPage() {
                               <td className="max-w-[10rem] truncate px-3 py-2" title={item.autor}>
                                 {item.autor || 'N/A'}
                               </td>
-                              <td className="px-3 py-2">{item.noInventario || 'N/A'}</td>
                               <td className="px-3 py-2">
                                 {item.copias > 1 ? (
                                   <label

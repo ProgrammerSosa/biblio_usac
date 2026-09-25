@@ -5,6 +5,7 @@ const { seedCategoriasDePrueba } = require('./helpers/seedCategorias');
 const { api } = require('./helpers/apiClient');
 const app = require('../server');
 const User = require('../src/users/user_model');
+const Catalog = require('../src/catalog/catalog_model');
 const Audit = require('../src/audit/audit_model');
 const { hashPassword } = require('../helpers/password');
 const { generateJWT } = require('../helpers/tokens');
@@ -313,74 +314,177 @@ describe('Aprobacion en lote (solo Admin)', () => {
   });
 });
 
-describe('No. de Inventario opcional (para materiales importados sin numero asignado)', () => {
-  test('se puede crear un registro sin noInventario', async () => {
-    const datos = libroValido(undefined);
-    delete datos.noInventario;
+describe('Rechazo en lote (solo Admin/Manager)', () => {
+  test('Admin puede rechazar varios registros pendientes de una sola vez, con el mismo motivo', async () => {
+    const ids = [];
+    for (const titulo of ['Rechazo lote 1', 'Rechazo lote 2', 'Rechazo lote 3']) {
+      const creado = await crearYEnviar(userToken, { ...libroValido(), titulo });
+      ids.push(creado.body.data._id);
+    }
 
-    const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos);
+    const res = await api(app)
+      .patch('/api/catalog/rechazar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids, observaciones: 'Faltan datos en los tres' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.rechazados).toBe(3);
+
+    for (const id of ids) {
+      const item = await api(app).get(`/api/catalog/${id}`).set('Authorization', `Bearer ${adminToken}`);
+      expect(item.body.data.estadoRevision).toBe(ESTADOS_REVISION.RECHAZADO);
+      expect(item.body.data.observaciones).toBe('Faltan datos en los tres');
+      expect(item.body.data.idInventario).toBeUndefined();
+    }
+  });
+
+  test('rechaza la peticion si no se mandan observaciones', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+
+    const res = await api(app)
+      .patch('/api/catalog/rechazar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids: [creado.body.data._id] });
+
+    expect(res.status).toBe(400);
+
+    const item = await api(app).get(`/api/catalog/${creado.body.data._id}`).set('Authorization', `Bearer ${adminToken}`);
+    expect(item.body.data.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE);
+  });
+
+  test('un Auxiliar no puede usar el rechazo en lote', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+
+    const res = await api(app)
+      .patch('/api/catalog/rechazar-lote')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ ids: [creado.body.data._id], observaciones: 'Motivo' });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('Copias detectadas automaticamente al registrar (sin ninguna accion extra)', () => {
+  test('registrar un material identico a uno que ya existe no choca con nada: cada registro queda propio, listo para agruparse en la vista', async () => {
+    // No existe ningun endpoint para "agregar copias": si ya hay 5 ejemplares en el catalogo
+    // y se registran 3 mas con exactamente los mismos datos (solo cambia estado fisico), los
+    // 3 se crean sin problema, cada uno como su propio documento Pendiente - la vista de
+    // Catalogo (CatalogListPage) los agrupa solos por coincidir en todo salvo estado fisico.
+    const datosBase = { ...libroValido(), titulo: 'Libro En Stock Multiple' };
+    for (let i = 0; i < 5; i++) {
+      const res = await api(app)
+        .post('/api/catalog')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ ...datosBase, estadoFisico: `Ejemplar ${i + 1}` });
+      expect(res.status).toBe(201);
+    }
+
+    for (let i = 0; i < 3; i++) {
+      const res = await api(app)
+        .post('/api/catalog')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ ...datosBase, estadoFisico: `Ejemplar nuevo ${i + 1}` });
+      expect(res.status).toBe(201);
+    }
+
+    const registros = await Catalog.find({ titulo: 'Libro En Stock Multiple' });
+    expect(registros).toHaveLength(8);
+    expect(registros.every((r) => r.estadoRevision === ESTADOS_REVISION.PENDIENTE)).toBe(true);
+  });
+});
+
+describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
+  test('un registro recien creado no tiene ID de inventario todavia', async () => {
+    const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido());
 
     expect(res.status).toBe(201);
-    expect(res.body.data.noInventario).toBeFalsy();
+    expect(res.body.data.idInventario).toBeUndefined();
   });
 
-  test('varios registros sin noInventario pueden coexistir (no chocan entre si)', async () => {
-    const datos1 = libroValido(undefined);
-    delete datos1.noInventario;
-    const datos2 = { ...libroValido(undefined), titulo: 'Otro titulo' };
-    delete datos2.noInventario;
+  test('al aprobar un registro se le asigna el primer ID disponible (1001)', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
 
-    const res1 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos1);
-    const res2 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos2);
-
-    expect(res1.status).toBe(201);
-    expect(res2.status).toBe(201);
-  });
-
-  test('cuando si se indica, el noInventario sigue teniendo que ser unico', async () => {
-    await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido('INV-DUP'));
     const res = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({ ...libroValido('INV-DUP'), titulo: 'Titulo distinto' });
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(res.body.data.idInventario).toBe(1001);
   });
 
-  // El formulario del frontend manda noInventario: '' (no omite el campo) cuando se deja en
-  // blanco. Eso no es lo mismo para el indice unique+sparse de Mongo: solo salta el indice
-  // cuando el campo esta ausente, no cuando vale ''. Sin limpiar la cadena vacia antes de
-  // guardar, el primer registro en blanco se crea bien pero el segundo choca como si "" fuera
-  // un No. de Inventario duplicado - exactamente el payload que manda el formulario real.
-  test('varios registros con noInventario: "" (como lo manda el formulario) tambien pueden coexistir', async () => {
-    const res1 = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido(''));
-    const res2 = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({ ...libroValido(''), titulo: 'Otro titulo' });
+  test('cada aprobacion siguiente recibe el proximo numero, en orden', async () => {
+    const uno = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Primero' });
+    const dos = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Segundo' });
 
-    expect(res1.status).toBe(201);
-    expect(res1.body.data.noInventario).toBeFalsy();
-    expect(res2.status).toBe(201);
-    expect(res2.body.data.noInventario).toBeFalsy();
+    const resUno = await api(app)
+      .patch(`/api/catalog/${uno.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+    const resDos = await api(app)
+      .patch(`/api/catalog/${dos.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    expect(resUno.body.data.idInventario).toBe(1001);
+    expect(resDos.body.data.idInventario).toBe(1002);
   });
 
-  test('editar un registro para dejarle noInventario: "" lo desasigna de verdad (no lo deja como "")', async () => {
-    const creado = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido('INV-A-QUITAR'));
+  test('rechazar un registro NO le asigna ID de inventario', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'RECHAZAR', observaciones: 'Falta corregir el autor' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.idInventario).toBeUndefined();
+  });
+
+  test('aprobar en lote tambien asigna un ID a cada registro', async () => {
+    const uno = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Lote uno' });
+    const dos = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Lote dos' });
+
+    const res = await api(app)
+      .patch('/api/catalog/aprobar-lote')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ids: [uno.body.data._id, dos.body.data._id] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aprobados).toBe(2);
+
+    const registros = await Catalog.find({ _id: { $in: [uno.body.data._id, dos.body.data._id] } });
+    expect(registros.map((r) => r.idInventario).sort()).toEqual([1001, 1002]);
+  });
+
+  test('si la Manager vuelve a guardar un registro ya Aprobado, no le reasigna otro ID', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
 
     const editado = await api(app)
       .patch(`/api/catalog/${creado.body.data._id}`)
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({ noInventario: '' });
-    expect(editado.status).toBe(200);
-    expect(editado.body.data.noInventario).toBeFalsy();
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ autor: 'Autor Corregido' });
 
-    // Si de verdad quedo desasignado (no en ""), otro registro en blanco no deberia chocar.
-    const otro = await api(app)
-      .post('/api/catalog')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({ ...libroValido(''), titulo: 'Otro mas' });
-    expect(otro.status).toBe(201);
+    expect(editado.status).toBe(200);
+    expect(editado.body.data.idInventario).toBe(1001);
+  });
+
+  test('se puede buscar un registro aprobado por su ID de inventario', async () => {
+    const creado = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Buscable por ID' });
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const res = await api(app).get('/api/catalog?buscar=1001').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.registros.map((r) => r.titulo)).toContain('Buscable por ID');
   });
 });
 
@@ -393,7 +497,6 @@ describe('Obtener un registro individual', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.noInventario).toBe('INV-007');
     expect(res.body.data.registradoPor.email).toBe('user@usac.gt');
     expect(res.body.data.atributos.EDITORIAL).toBe('Editorial USAC');
   });
@@ -447,7 +550,7 @@ describe('Filtro por registradoPor', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.registros).toHaveLength(1);
-    expect(res.body.data.registros[0].noInventario).toBe('INV-010');
+    expect(res.body.data.registros[0].titulo).toBe('Titulo de Prueba');
   });
 });
 
@@ -543,5 +646,40 @@ describe('Ordenamiento del catalogo (parametro sort)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.registros).toHaveLength(1);
+  });
+});
+
+describe('Paginacion agrupada por copias (GET /api/catalog)', () => {
+  test('las copias de un mismo material siempre caen en la misma pagina, sin importar cuando se creo cada una', async () => {
+    // 3 copias "viejas" del mismo libro, ya aprobadas.
+    for (let i = 0; i < 3; i++) {
+      const creado = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Libro Viejo En Stock', estadoFisico: `Copia vieja ${i + 1}` });
+      await api(app).patch(`/api/catalog/${creado.body.data._id}/revisar`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'APROBAR' });
+    }
+
+    // 3 materiales aparte (no son copias de nada), creados y aprobados despues.
+    for (let i = 0; i < 3; i++) {
+      const creado = await crearYEnviar(userToken, { ...libroValido(), titulo: `Libro Aparte ${i + 1}` });
+      await api(app).patch(`/api/catalog/${creado.body.data._id}/revisar`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'APROBAR' });
+    }
+
+    // Una 4ta copia del "Libro Viejo En Stock", recien registrada y aprobada - de los 7
+    // documentos totales, es el mas reciente de todos.
+    const nueva = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Libro Viejo En Stock', estadoFisico: 'Copia nueva' });
+    await api(app).patch(`/api/catalog/${nueva.body.data._id}/revisar`).set('Authorization', `Bearer ${adminToken}`).send({ decision: 'APROBAR' });
+
+    // Ordenando del mas nuevo al mas viejo, con solo 2 materiales por pagina: sin agrupar
+    // antes de paginar, la pagina 1 traeria nada mas los 2 documentos mas recientes (esta
+    // copia nueva + el ultimo "Libro Aparte"), dejando las 3 copias viejas del mismo libro
+    // varadas en otra pagina - exactamente el problema reportado. Agrupando antes de paginar,
+    // las 4 copias de "Libro Viejo En Stock" viajan juntas, aunque 3 sean mucho mas viejas.
+    const res = await api(app)
+      .get('/api/catalog?estadoRevision=APROBADO&sort=fecha_desc&limit=2&page=1')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(4); // 4 materiales distintos: el libro con copias + 3 aparte
+    const titulosEnPagina1 = res.body.data.registros.map((r) => r.titulo);
+    expect(titulosEnPagina1.filter((t) => t === 'Libro Viejo En Stock')).toHaveLength(4);
   });
 });

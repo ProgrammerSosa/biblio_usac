@@ -25,19 +25,8 @@ const TAMANO_PAGINA_OFICIO = [612, 936];
 const ANCHO_MIN_ATRIBUTO = 70;
 const ANCHO_MAX_ATRIBUTO = 220;
 
-// Numero de control (1, 2, 3...): solo para llevar la cuenta de cuantos
-// registros van en el reporte, en el mismo orden en que salen (respeta
-// "Ordenar por"). No se guarda en la base de datos ni depende del No. de
-// Inventario, que puede quedar vacio.
-const columnaNo = (numeroPorId) => ({
-  key: 'no',
-  header: 'No.',
-  width: 26,
-  render: (row) => String(numeroPorId.get(String(row._id)) ?? ''),
-});
-
 const COLUMNAS_FIJAS = () => [
-  { key: 'noInventario', header: 'No. Inv.', width: 50 },
+  { key: 'idInventario', header: 'ID', width: 40 },
   { key: 'titulo', header: 'Titulo', width: 140 },
   { key: 'autor', header: 'Autor', width: 95 },
 ];
@@ -108,10 +97,10 @@ function construirColumnasAtributos(campos) {
 // debajo, cada una con su propio lote de columnas hasta agotarlos todos. Asi
 // ninguna columna termina mas angosta que ANCHO_MIN_ATRIBUTO, sin importar
 // cuantos campos tenga la categoria.
-function construirGruposColumnas(categoriaDoc, anchoDisponible, numeroPorId) {
+function construirGruposColumnas(categoriaDoc, anchoDisponible) {
   const { opcionales: comunesActivos, finales: columnasFinales } = columnasComunesActivas(categoriaDoc);
   const columnasAtributos = construirColumnasAtributos(categoriaDoc.campos || []);
-  const columnasFijas = [columnaNo(numeroPorId), ...COLUMNAS_FIJAS()];
+  const columnasFijas = COLUMNAS_FIJAS();
 
   if (columnasAtributos.length === 0) {
     return [[...columnasFijas, ...comunesActivos, ...columnasFinales]];
@@ -171,8 +160,13 @@ async function exportCatalogPdf(req, res, next) {
     // enviar solo lo ve quien lo creo, nunca deberia colarse en el PDF de alguien mas.
     const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
     if (buscar && buscar.trim()) {
-      const patron = new RegExp(escapeRegExp(buscar.trim()), 'i');
-      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { noInventario: patron }] });
+      const textoBuscado = buscar.trim();
+      const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
+      const opciones = [{ titulo: patron }, { autor: patron }];
+      if (/^\d+$/.test(textoBuscado)) {
+        opciones.push({ idInventario: parseInt(textoBuscado, 10) });
+      }
+      clausulas.push({ $or: opciones });
     }
     const filtroFinal = { $and: clausulas };
 
@@ -184,8 +178,6 @@ async function exportCatalogPdf(req, res, next) {
     if (registros.length === 0) {
       return fail(res, 'No hay registros que coincidan con los filtros indicados', 404);
     }
-
-    const numeroPorId = new Map(registros.map((r, i) => [String(r._id), i + 1]));
 
     await registrarAuditoria({
       accion: ACCIONES_AUDITORIA.EXPORTAR,
@@ -233,7 +225,7 @@ async function exportCatalogPdf(req, res, next) {
       doc.moveDown(0.3);
 
       const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const gruposColumnas = construirGruposColumnas(categoriaDoc, anchoDisponible, numeroPorId);
+      const gruposColumnas = construirGruposColumnas(categoriaDoc, anchoDisponible);
       drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas });
       doc.moveDown(1);
     }

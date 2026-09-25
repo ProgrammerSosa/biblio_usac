@@ -10,15 +10,14 @@ const catalogSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
-    // No siempre se conoce al momento de registrar (ej. importando materiales viejos que
-    // aun no tienen numero fisico asignado) - por eso no es obligatorio a nivel de esquema,
-    // aunque el formulario de registro manual si lo exige. "sparse" permite que muchos
-    // registros queden sin valor a la vez, sin romper la unicidad entre los que si lo tienen.
-    noInventario: {
-      type: String,
+    // Ya no se escribe a mano: se asigna solo, en orden (1001, 1002, 1003...), la primera
+    // vez que el registro queda Aprobado (ver helpers/idInventario.js) - un registro que
+    // sigue Pendiente o fue Rechazado todavia no tiene. "sparse" permite que todos esos
+    // queden sin valor a la vez, sin romper la unicidad entre los que si ya lo tienen.
+    idInventario: {
+      type: Number,
       unique: true,
       sparse: true,
-      trim: true,
     },
     autor: {
       type: String,

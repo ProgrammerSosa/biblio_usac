@@ -15,6 +15,7 @@ import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
 import { Select } from '../../shared/components/FormField';
 import CatalogDetailFields from './CatalogDetailFields';
+import { agruparRegistros } from '../../shared/utils/catalogGrouping';
 
 const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'danger' };
 
@@ -36,43 +37,6 @@ function RegistradoPor({ item }) {
       {item.registradoPor?.nombre || 'N/A'}
     </span>
   );
-}
-
-function normalizarParaComparar(valor) {
-  // Datos escritos a mano (o importados de distintos Excel) casi nunca coinciden byte por
-  // byte aunque sean "el mismo autor": espacios dobles, espacios al inicio/final, mayusculas
-  // distintas, acentos puestos o no ("Garcia" vs "García"). Se normaliza antes de comparar
-  // para que esas diferencias menores no partan en dos lo que en realidad es la misma obra.
-  // Misma regla que usa el import de Excel (excelImport.js) para que ambos coincidan.
-  return String(valor ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-}
-
-// Dos registros son "copias" del mismo material si TODO coincide - categoria, autor, titulo,
-// idioma, anio, edicion, lugar, paginas y los atributos propios de la categoria (editorial,
-// ISBN, etc.) - excepto el estado fisico y el No. de Inventario, los dos unicos datos que de
-// verdad cambian entre copias fisicas del mismo libro.
-function claveDeGrupo(item) {
-  const camposBase = [item.categoria, item.autor, item.titulo, item.idioma, item.anio, item.edicion, item.lugar, item.paginasImpresas];
-  const atributos = item.atributos || {};
-  const atributosOrdenados = Object.keys(atributos)
-    .sort()
-    .map((clave) => `${clave}:${atributos[clave]}`);
-  return [...camposBase, ...atributosOrdenados].map(normalizarParaComparar).join('|');
-}
-
-function agruparRegistros(registros) {
-  const grupos = new Map();
-  for (const item of registros) {
-    const clave = claveDeGrupo(item);
-    if (!grupos.has(clave)) grupos.set(clave, []);
-    grupos.get(clave).push(item);
-  }
-  return [...grupos.values()].map((copias) => ({ ...copias[0], copias }));
 }
 
 function nombreArchivoPdf() {
@@ -128,7 +92,7 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
       <table className="w-full text-left text-sm">
         <thead className="bg-white text-xs uppercase tracking-wide text-slate-500">
           <tr>
-            <th className="px-3 py-2 font-semibold">No. Inventario</th>
+            <th className="px-3 py-2 font-semibold">ID</th>
             <th className="px-3 py-2 font-semibold">Estado fisico</th>
             <th className="px-3 py-2 font-semibold">Estado</th>
             <th className="px-3 py-2 font-semibold">Registrado por</th>
@@ -138,7 +102,7 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
         <tbody className="divide-y divide-border bg-white">
           {copias.map((copia) => (
             <tr key={copia._id}>
-              <td className="px-3 py-2 font-medium text-slate-700">{copia.noInventario || 'N/A'}</td>
+              <td className="px-3 py-2 font-medium text-slate-700">{copia.idInventario ?? 'N/A'}</td>
               <td className="px-3 py-2">
                 {tieneDanoFisico(copia.estadoFisico) ? (
                   <Badge tone="danger" icon={AlertTriangle}>
@@ -342,18 +306,7 @@ export default function CatalogListPage() {
   const filas = agruparRegistros(registros);
   const borradoresEnPagina = filas.filter((f) => f.copias.length === 1 && !f.copias[0].enviado).map((f) => f.copias[0]);
 
-  // Numero de control: 1, 2, 3... segun el orden que se ve en pantalla (Ordenar por
-  // incluido), continuando de una pagina a la siguiente en vez de reiniciar en 1.
-  // Es solo para llevar la cuenta de cuantos van - no se guarda en la base de datos,
-  // por eso no lo mueve el No. de Inventario (que puede quedar vacio).
-  const numeroPorId = new Map(filas.map((fila, indice) => [fila._id, (page - 1) * 15 + indice + 1]));
-
   const columns = [
-    {
-      key: 'no',
-      header: 'No.',
-      render: (row) => numeroPorId.get(row._id),
-    },
     ...(borradoresEnPagina.length > 0
       ? [
           {
@@ -381,8 +334,8 @@ export default function CatalogListPage() {
         ]
       : []),
     {
-      key: 'noInventario',
-      header: 'No. Inv.',
+      key: 'idInventario',
+      header: 'ID',
       render: (row) =>
         row.copias.length > 1 ? (
           // El primer ejemplar no es "copia de si mismo" - se muestran las copias
@@ -391,7 +344,7 @@ export default function CatalogListPage() {
             {row.copias.length - 1} {row.copias.length === 2 ? 'copia' : 'copias'}
           </Badge>
         ) : (
-          row.noInventario || 'N/A'
+          row.idInventario ?? 'N/A'
         ),
     },
     {
@@ -541,7 +494,7 @@ export default function CatalogListPage() {
           type="text"
           value={buscarInput}
           onChange={(e) => setBuscarInput(e.target.value)}
-          placeholder="Buscar por titulo, autor o no. de inventario..."
+          placeholder="Buscar por titulo, autor o ID..."
           className="w-full rounded-md border border-border bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
         />
       </div>
@@ -652,8 +605,9 @@ export default function CatalogListPage() {
         }
       >
         <p className="text-sm text-slate-600">
-          ¿Confirmas eliminar el registro <strong>{itemAEliminar?.titulo}</strong> (No. Inventario{' '}
-          {itemAEliminar?.noInventario})? Esta accion quedara registrada en la auditoria.
+          ¿Confirmas eliminar el registro <strong>{itemAEliminar?.titulo}</strong>
+          {itemAEliminar?.idInventario ? ` (ID ${itemAEliminar.idInventario})` : ''}? Esta accion quedara registrada en
+          la auditoria.
         </p>
       </Modal>
 

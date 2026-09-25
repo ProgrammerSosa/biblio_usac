@@ -7,6 +7,7 @@ export const catalogApi = {
   update: (id, data) => axiosClient.patch(`/catalog/${id}`, data),
   revisar: (id, data) => axiosClient.patch(`/catalog/${id}/revisar`, data),
   aprobarLote: (ids) => axiosClient.patch('/catalog/aprobar-lote', { ids }),
+  rechazarLote: (ids, observaciones) => axiosClient.patch('/catalog/rechazar-lote', { ids, observaciones }),
   enviarLote: (ids) => axiosClient.patch('/catalog/enviar-lote', { ids }),
   remove: (id) => axiosClient.delete(`/catalog/${id}`),
   exportPdf: (params) => axiosClient.get('/exports/catalog', { params, responseType: 'blob' }),

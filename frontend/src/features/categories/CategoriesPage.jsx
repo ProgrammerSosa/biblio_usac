@@ -13,8 +13,9 @@ import { Input } from '../../shared/components/FormField';
 const CAMPO_VACIO = () => ({ etiqueta: '', requerido: true });
 
 // Campos que el formulario de registro ya muestra siempre, sin importar la categoria.
-// Autor, Titulo y No. de Inventario nunca se pueden apagar; el resto si, por categoria.
-const CAMPOS_COMUNES_FIJOS = ['No. de Inventario', 'Autor', 'Titulo'];
+// Autor y Titulo nunca se pueden apagar; el resto si, por categoria. El ID de inventario ya
+// no se pide en el formulario - se asigna solo cuando el registro se aprueba.
+const CAMPOS_COMUNES_FIJOS = ['Autor', 'Titulo'];
 const CAMPOS_COMUNES_OPCIONALES = [
   { clave: 'idioma', etiqueta: 'Idioma' },
   { clave: 'anio', etiqueta: 'Año' },

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, ClipboardCheck, ListChecks, Pencil, FileSpreadsheet } from 'lucide-react';
+import { CheckCircle2, XCircle, ClipboardCheck, ListChecks, Pencil, FileSpreadsheet, Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { catalogApi } from '../catalog/catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
 import { useCategories } from '../../shared/hooks/useCategories';
 import { ESTADOS_REVISION, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
+import { agruparRegistros } from '../../shared/utils/catalogGrouping';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
 import Tabs from '../../shared/components/Tabs';
@@ -41,6 +42,43 @@ function RegistradoPor({ item }) {
   );
 }
 
+// Desglose de solo lectura para un grupo de copias ya aprobadas (la pestaña Aprobados no
+// tiene acciones por fila, a diferencia de Pendientes que si las necesita para revisar).
+function ListaCopiasAprobadas({ copias }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-white text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-3 py-2 font-semibold">ID</th>
+            <th className="px-3 py-2 font-semibold">Estado fisico</th>
+            <th className="px-3 py-2 font-semibold">Registrado por</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border bg-white">
+          {copias.map((copia) => (
+            <tr key={copia._id}>
+              <td className="px-3 py-2 font-medium text-slate-700">{copia.idInventario ?? 'N/A'}</td>
+              <td className="px-3 py-2">
+                {tieneDanoFisico(copia.estadoFisico) ? (
+                  <Badge tone="danger">{copia.estadoFisico}</Badge>
+                ) : (
+                  <span className="block max-w-[14rem] truncate text-slate-500" title={copia.estadoFisico}>
+                    {copia.estadoFisico || 'N/A'}
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                <RegistradoPor item={copia} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ApprovalsPage() {
   const { user } = useAuth();
   const { etiquetaDe } = useCategories();
@@ -61,6 +99,10 @@ export default function ApprovalsPage() {
   const [loteAbierto, setLoteAbierto] = useState(false);
   const [aprobandoLote, setAprobandoLote] = useState(false);
   const [errorLote, setErrorLote] = useState('');
+  const [rechazoLoteAbierto, setRechazoLoteAbierto] = useState(false);
+  const [observacionesLote, setObservacionesLote] = useState('');
+  const [rechazandoLote, setRechazandoLote] = useState(false);
+  const [errorRechazoLote, setErrorRechazoLote] = useState('');
 
   const puedeAprobar = [ROLES.ADMIN, ROLES.MANAGER].includes(user?.rol);
   const puedeActuar = puedeAprobar && activeTab === ESTADOS_REVISION.PENDIENTE;
@@ -154,6 +196,38 @@ export default function ApprovalsPage() {
     }
   }
 
+  function abrirRechazoLote() {
+    setObservacionesLote('');
+    setErrorRechazoLote('');
+    setRechazoLoteAbierto(true);
+  }
+
+  async function confirmarRechazoLote() {
+    if (!observacionesLote.trim()) {
+      setErrorRechazoLote('Las observaciones son obligatorias al rechazar');
+      return;
+    }
+    setRechazandoLote(true);
+    setErrorRechazoLote('');
+    try {
+      const res = await catalogApi.rechazarLote([...seleccionados], observacionesLote.trim());
+      setMensaje(`${res.data.data.rechazados} registro(s) rechazado(s) correctamente`);
+      setSeleccionados(new Set());
+      setRechazoLoteAbierto(false);
+      await cargar();
+    } catch (err) {
+      setErrorRechazoLote(getErrorMessage(err, 'No se pudo rechazar el lote'));
+    } finally {
+      setRechazandoLote(false);
+    }
+  }
+
+  // La pestaña "Aprobados" agrupa copias del mismo material en un solo renglon (igual que
+  // Catalogo) - tiene sentido porque ahi ya no hay nada que revisar por separado, es solo
+  // consulta. "Pendientes" se deja sin agrupar: cada copia se revisa (aprueba/rechaza) por su
+  // cuenta, aunque sea copia de otra, asi que agruparlas complicaria esa accion sin necesidad.
+  const filas = activeTab === ESTADOS_REVISION.APROBADO ? agruparRegistros(registros) : registros.map((r) => ({ ...r, copias: [r] }));
+
   const columns = [
     ...(puedeActuar
       ? [
@@ -180,7 +254,18 @@ export default function ApprovalsPage() {
           },
         ]
       : []),
-    { key: 'noInventario', header: 'No. Inv.', render: (row) => row.noInventario || 'N/A' },
+    {
+      key: 'idInventario',
+      header: 'ID',
+      render: (row) =>
+        row.copias.length > 1 ? (
+          <Badge tone="primary" icon={Layers}>
+            {row.copias.length - 1} {row.copias.length === 2 ? 'copia' : 'copias'}
+          </Badge>
+        ) : (
+          row.idInventario ?? 'N/A'
+        ),
+    },
     {
       key: 'categoria',
       header: 'Categoria',
@@ -214,16 +299,39 @@ export default function ApprovalsPage() {
     {
       key: 'estadoFisico',
       header: 'Estado fisico',
-      render: (row) =>
-        tieneDanoFisico(row.estadoFisico) ? (
+      render: (row) => {
+        if (row.copias.length > 1) {
+          const conDano = row.copias.filter((c) => tieneDanoFisico(c.estadoFisico));
+          if (conDano.length > 0) {
+            return <Badge tone="danger">{conDano.length} de {row.copias.length} con daño</Badge>;
+          }
+          const texto = row.copias[0].estadoFisico || 'N/A';
+          return (
+            <span className="block max-w-[8rem] truncate text-slate-500" title={texto}>
+              {texto}
+            </span>
+          );
+        }
+        return tieneDanoFisico(row.estadoFisico) ? (
           <Badge tone="danger">{row.estadoFisico}</Badge>
         ) : (
           <span className="block max-w-[8rem] truncate" title={row.estadoFisico}>
             {row.estadoFisico || 'N/A'}
           </span>
-        ),
+        );
+      },
     },
-    { key: 'registradoPor', header: 'Registrado por', render: (row) => <RegistradoPor item={row} /> },
+    {
+      key: 'registradoPor',
+      header: 'Registrado por',
+      render: (row) => {
+        if (row.copias.length > 1) {
+          const claves = new Set(row.copias.map((c) => c.origenImportacion || c.registradoPor?.nombre || 'N/A'));
+          return claves.size === 1 ? <RegistradoPor item={row.copias[0]} /> : 'Varios';
+        }
+        return <RegistradoPor item={row} />;
+      },
+    },
     ...(puedeActuar
       ? [
           {
@@ -243,6 +351,18 @@ export default function ApprovalsPage() {
         ]
       : []),
   ];
+
+  function renderExpanded(row) {
+    if (row.copias.length === 1) {
+      return <CatalogDetailFields item={row.copias[0]} />;
+    }
+    return (
+      <div className="flex flex-col gap-4">
+        <CatalogDetailFields item={row.copias[0]} ocultarRevision />
+        <ListaCopiasAprobadas copias={row.copias} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -286,6 +406,9 @@ export default function ApprovalsPage() {
             <Button variant="ghost" onClick={() => setSeleccionados(new Set())}>
               Cancelar seleccion
             </Button>
+            <Button variant="danger" icon={XCircle} onClick={abrirRechazoLote}>
+              Rechazar seleccionados
+            </Button>
             <Button icon={ListChecks} onClick={() => setLoteAbierto(true)}>
               Aprobar seleccionados
             </Button>
@@ -307,11 +430,11 @@ export default function ApprovalsPage() {
 
       <DataTable
         columns={columns}
-        rows={registros}
+        rows={filas}
         rowKey="_id"
         loading={loading}
         emptyMessage="No hay registros en este filtro"
-        renderExpanded={(row) => <CatalogDetailFields item={row} />}
+        renderExpanded={renderExpanded}
         rowClassName={filaColor}
       />
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
@@ -394,6 +517,37 @@ export default function ApprovalsPage() {
             vez. Quedaran marcados como Aprobados y saldran de la cola de pendientes.
           </p>
           <AlertBanner>{errorLote}</AlertBanner>
+        </div>
+      </Modal>
+
+      <Modal
+        open={rechazoLoteAbierto}
+        title="Rechazar registros seleccionados"
+        onClose={() => setRechazoLoteAbierto(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRechazoLoteAbierto(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" icon={XCircle} onClick={confirmarRechazoLote} disabled={rechazandoLote}>
+              {rechazandoLote ? 'Rechazando...' : `Rechazar ${seleccionados.size} registro(s)`}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-600">
+            Vas a rechazar <strong>{seleccionados.size}</strong> registro{seleccionados.size === 1 ? '' : 's'} de una
+            vez, con el mismo motivo para todos. Cada autor vera esta observacion y podra corregir y reenviar el suyo.
+          </p>
+          <Textarea
+            label="Observaciones"
+            required
+            placeholder="Explica que se debe corregir"
+            value={observacionesLote}
+            onChange={(e) => setObservacionesLote(e.target.value)}
+          />
+          <AlertBanner>{errorRechazoLote}</AlertBanner>
         </div>
       </Modal>
     </div>

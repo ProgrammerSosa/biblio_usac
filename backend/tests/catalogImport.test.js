@@ -66,10 +66,12 @@ async function construirExcelDePrueba() {
     'Copias',
     'Donante',
   ]);
-  hoja.addRow([1, 'Autor Valido', 'Libro Valido Unico', 'Español', 2020, '1ra', 'Editorial X', 'Guatemala', '978-1', 'Fisico', 200, 'IMP-001', 'Buen estado', 'Sin notas', 1, '']);
+  // La columna "Copias" se ignora a proposito (ver excelImport.js) - un valor cualquiera aqui
+  // no debe cambiar nada; lo que cuenta son filas identicas fusionadas (ver mas abajo).
+  hoja.addRow([1, 'Autor Valido', 'Libro Valido Unico', 'Español', 2020, '1ra', 'Editorial X', 'Guatemala', '978-1', 'Fisico', 200, 'IMP-001', 'Buen estado', 'Sin notas', 9, '']);
   // Estas 3 filas son "el mismo libro" (autor+titulo+edicion+idioma) con variaciones tipicas
   // de Excel real: con/sin acento, mayusculas y espacios de mas, y estado fisico distinto -
-  // deben agruparse solas en un item con copias:3, sin usar la columna "Copias" para nada.
+  // deben agruparse solas en un item con copias:3 (una fila = un ejemplar fisico).
   hoja.addRow([2, 'Jose Copias', 'Libro Con Copias', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002', 'Buen estado', '', '', 'Donante X']);
   hoja.addRow([3, 'José Copias', 'Libro Con Copias', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002B', 'Regular', '', '', '']);
   hoja.addRow([4, 'JOSE  COPIAS', '  Libro Con Copias ', 'Español', 2019, '2da', 'Editorial Y', 'Guatemala', '978-2', 'Fisico', 150, 'IMP-002C', 'Deteriorado', '', '', '']);
@@ -122,20 +124,17 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
 
     const valido = hojaLibros.items.find((i) => i.titulo === 'Libro Valido Unico');
     expect(valido.valido).toBe(true);
-    expect(valido.noInventario).toBe('IMP-001');
     expect(valido.atributos.ISBN).toBe('978-1');
     expect(valido.estadoFisico).toBe('Buen estado - Sin notas');
     expect(valido.copias).toBe(1);
     expect(valido.camposFaltantes).toEqual([]);
 
     // Las 3 filas "Libro Con Copias" (con acento, sin acento, mayusculas/espacios de mas)
-    // se agrupan solas como copias del mismo material - la columna "Copias" del Excel ya no
-    // se usa para nada, y cada No. de Inventario real se conserva (no se pierden 2 de 3).
+    // se agrupan solas como copias del mismo material - una fila = un ejemplar fisico. El
+    // No. de Inventario del Excel ya no se lee.
     const conCopias = hojaLibros.items.find((i) => i.titulo === 'Libro Con Copias');
     expect(conCopias.copias).toBe(3);
     expect(conCopias.filas).toHaveLength(3);
-    expect(conCopias.noInventario).toBe('IMP-002');
-    expect(conCopias.noInventarios).toEqual(['IMP-002', 'IMP-002B', 'IMP-002C']);
 
     const sinIsbn = hojaLibros.items.find((i) => i.titulo === 'Libro Sin ISBN');
     expect(sinIsbn.valido).toBe(true);
@@ -143,9 +142,68 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
     expect(sinIsbn.camposFaltantes).toEqual(['ISBN']);
 
     // "Donante" no es un campo conocido de LIBRO: se avisa en vez de perderse callado. "Copias"
-    // si se reconoce (aunque ya no se use para nada), asi que no debe aparecer como desconocida.
+    // y "No. De Inventario" si se reconocen, pero las dos se ignoran a proposito, asi que
+    // ninguna debe aparecer como columna desconocida.
     expect(hojaLibros.camposDesconocidos).toContain('donante');
     expect(hojaLibros.camposDesconocidos).not.toContain('copias');
+    expect(hojaLibros.camposDesconocidos).not.toContain('no. de inventario');
+  });
+
+  test('la columna "Copias" del Excel se ignora - las copias se detectan agrupando filas identicas', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento', 'Copias']);
+    // El valor de "Copias" (4) no debe usarse para nada: como es una sola fila, cuenta como 1
+    // solo ejemplar, sin importar lo que diga esa columna.
+    hoja.addRow(['Autor Copias', 'Libro Con Columna Copias', 'Ed', '1', 'Fisico', 4]);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    const items = res.body.data.hojas[0].items;
+    expect(items).toHaveLength(1);
+    expect(items[0].filas).toHaveLength(1);
+    expect(items[0].copias).toBe(1);
+
+    const confirmar = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ items, archivoOrigen: 'prueba.xlsx' });
+
+    expect(confirmar.body.data.creados).toBe(1);
+  });
+
+  test('varias filas identicas (mismos datos, distinto estado fisico) se detectan como copias sin declarar cantidad', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento', 'Estado fisico']);
+    hoja.addRow(['Autor Stock', 'Libro En Stock', 'Ed', '1', 'Fisico', 'Buen estado']);
+    hoja.addRow(['Autor Stock', 'Libro En Stock', 'Ed', '1', 'Fisico', 'Buen estado']);
+    hoja.addRow(['Autor Stock', 'Libro En Stock', 'Ed', '1', 'Fisico', 'Buen estado']);
+    hoja.addRow(['Autor Stock', 'Libro En Stock', 'Ed', '1', 'Fisico', 'Buen estado']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    const items = res.body.data.hojas[0].items;
+    expect(items).toHaveLength(1);
+    expect(items[0].copias).toBe(4);
+    expect(items[0].filas).toHaveLength(4);
+
+    const confirmar = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ items, archivoOrigen: 'prueba.xlsx' });
+
+    expect(confirmar.body.data.creados).toBe(4);
   });
 
   test('si difieren en un campo que no sea estado fisico o No. de Inventario, NO son copias', async () => {
@@ -169,13 +227,12 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
     expect(items.every((i) => i.copias === 1)).toBe(true);
   });
 
-  test('un No. de Inventario escrito como "N/A" (o variantes) se trata como ausente, no como un valor real', async () => {
+  test('la columna "No. De Inventario" del Excel se ignora (el ID ya se asigna solo al aprobar)', async () => {
     const workbook = new ExcelJS.Workbook();
     const hoja = workbook.addWorksheet('Libros');
     hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento', 'No. De Inventario']);
-    hoja.addRow(['Autor Uno', 'Libro Uno Sin Inventario Real', 'Ed', '1', 'Fisico', 'N/A']);
-    hoja.addRow(['Autor Dos', 'Libro Dos Sin Inventario Real', 'Ed', '2', 'Fisico', 'n/a']);
-    hoja.addRow(['Autor Tres', 'Libro Tres Sin Inventario Real', 'Ed', '3', 'Fisico', 'S/N']);
+    hoja.addRow(['Autor Uno', 'Libro Uno Con Columna Vieja', 'Ed', '1', 'Fisico', '1234']);
+    hoja.addRow(['Autor Dos', 'Libro Dos Con Columna Vieja', 'Ed', '2', 'Fisico', 'N/A']);
     const buffer = await workbook.xlsx.writeBuffer();
 
     const previsualizar = await api(app)
@@ -185,17 +242,18 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
 
     expect(previsualizar.status).toBe(200);
     const items = previsualizar.body.data.hojas[0].items;
-    expect(items.every((i) => !i.noInventario)).toBe(true);
+    expect(items.every((i) => i.noInventario === undefined)).toBe(true);
 
-    // Lo que de verdad importaba: que las 3 filas -todas "sin numero"- se puedan confirmar
-    // juntas sin que la 2a y 3a choquen contra la 1a como si "N/A" fuera un numero repetido.
     const confirmar = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${managerToken}`)
       .send({ items, archivoOrigen: 'prueba.xlsx' });
 
-    expect(confirmar.body.data.creados).toBe(3);
+    expect(confirmar.body.data.creados).toBe(2);
     expect(confirmar.body.data.errores).toHaveLength(0);
+
+    const guardados = await Catalog.find({ titulo: { $in: ['Libro Uno Con Columna Vieja', 'Libro Dos Con Columna Vieja'] } });
+    expect(guardados.every((g) => g.idInventario === undefined)).toBe(true);
   });
 
   test('una celda con texto de formato mixto (rich text) se lee como texto plano, no como objeto', async () => {
@@ -280,7 +338,6 @@ describe('POST /api/catalog/importar/confirmar', () => {
   function itemValido(overrides = {}) {
     return {
       categoria: 'LIBRO',
-      noInventario: 'IMP-CONF-1',
       autor: 'Autor Importado',
       titulo: 'Titulo Importado',
       idioma: 'Español',
@@ -304,7 +361,7 @@ describe('POST /api/catalog/importar/confirmar', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.creados).toBe(1);
 
-    const registro = await Catalog.findOne({ noInventario: 'IMP-CONF-1' });
+    const registro = await Catalog.findOne({ titulo: 'Titulo Importado' });
     expect(registro.registradoPor.toString()).toBe(auxiliar._id.toString());
   });
 
@@ -315,7 +372,7 @@ describe('POST /api/catalog/importar/confirmar', () => {
       .send({
         items: [
           itemValido(), // LIBRO: si permitido
-          itemValido({ categoria: 'REVISTA', noInventario: 'IMP-CONF-REV', titulo: 'Revista No Permitida', atributos: { EDITORIAL: 'E', ISSN: '1', VOLUMEN: '1' } }),
+          itemValido({ categoria: 'REVISTA', titulo: 'Revista No Permitida', atributos: { EDITORIAL: 'E', ISSN: '1', VOLUMEN: '1' } }),
         ],
       });
 
@@ -325,8 +382,8 @@ describe('POST /api/catalog/importar/confirmar', () => {
     expect(res.body.data.errores[0].titulo).toBe('Revista No Permitida');
     expect(res.body.data.errores[0].error).toMatch(/no tienes permiso/i);
 
-    expect(await Catalog.findOne({ noInventario: 'IMP-CONF-1' })).not.toBeNull();
-    expect(await Catalog.findOne({ noInventario: 'IMP-CONF-REV' })).toBeNull();
+    expect(await Catalog.findOne({ titulo: 'Titulo Importado' })).not.toBeNull();
+    expect(await Catalog.findOne({ titulo: 'Revista No Permitida' })).toBeNull();
   });
 
   test('rechaza la peticion si no hay items', async () => {
@@ -346,11 +403,11 @@ describe('POST /api/catalog/importar/confirmar', () => {
 
     expect(res.status).toBe(200);
 
-    const registro = await Catalog.findOne({ noInventario: 'IMP-CONF-1' });
+    const registro = await Catalog.findOne({ titulo: 'Titulo Importado' });
     expect(registro.origenImportacion).toBe('Base_Ingreso - Gabriela.xlsx');
   });
 
-  test('crea el registro como Pendiente pero ya enviado (visible para revisar, no autoaprobado)', async () => {
+  test('crea el registro como Pendiente pero ya enviado (visible para revisar, no autoaprobado), sin ID de inventario todavia', async () => {
     const res = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${managerToken}`)
@@ -359,84 +416,54 @@ describe('POST /api/catalog/importar/confirmar', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.creados).toBe(1);
 
-    const registro = await Catalog.findOne({ noInventario: 'IMP-CONF-1' });
+    const registro = await Catalog.findOne({ titulo: 'Titulo Importado' });
     expect(registro.estadoRevision).toBe(ESTADOS_REVISION.PENDIENTE);
     expect(registro.enviado).toBe(true);
     expect(registro.registradoPor.toString()).toBe(manager._id.toString());
+    // El ID de inventario se asigna hasta que se aprueba (ver catalogFlow.test.js), no al importar.
+    expect(registro.idInventario).toBeUndefined();
   });
 
-  test('crea la cantidad de copias indicada; solo la primera se queda con el No. de Inventario', async () => {
+  test('crea la cantidad de copias indicada (columna "Copias" o filas agrupadas, ya sumadas en el item)', async () => {
     const res = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ items: [itemValido({ noInventario: 'IMP-CONF-2', titulo: 'Libro Con 3 Copias', copias: 3 })] });
+      .send({ items: [itemValido({ titulo: 'Libro Con 3 Copias', copias: 3 })] });
 
     expect(res.status).toBe(200);
     expect(res.body.data.creados).toBe(3);
 
     const registros = await Catalog.find({ titulo: 'Libro Con 3 Copias' });
     expect(registros).toHaveLength(3);
-    const conNumero = registros.filter((r) => r.noInventario);
-    expect(conNumero).toHaveLength(1);
-    expect(conNumero[0].noInventario).toBe('IMP-CONF-2');
   });
 
   test('si un item no trae copias (>1 desmarcado por el usuario), importa solo 1', async () => {
     const res = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ items: [itemValido({ noInventario: 'IMP-CONF-3', titulo: 'Libro Copias Desmarcadas', copias: 1 })] });
+      .send({ items: [itemValido({ titulo: 'Libro Copias Desmarcadas', copias: 1 })] });
 
     expect(res.status).toBe(200);
     expect(res.body.data.creados).toBe(1);
   });
 
-  test('si el item trae noInventarios (filas agrupadas por copia), cada copia se queda con el suyo', async () => {
+  test('si un item no pasa la validacion (categoria inexistente), reporta el error sin tumbar el resto del lote', async () => {
     const res = await api(app)
       .post('/api/catalog/importar/confirmar')
       .set('Authorization', `Bearer ${managerToken}`)
       .send({
         items: [
-          itemValido({
-            titulo: 'Libro Con Inventarios Reales',
-            copias: 3,
-            noInventario: 'IMP-REAL-1',
-            noInventarios: ['IMP-REAL-1', 'IMP-REAL-2', 'IMP-REAL-3'],
-          }),
-        ],
-      });
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.creados).toBe(3);
-
-    const registros = await Catalog.find({ titulo: 'Libro Con Inventarios Reales' }).sort({ noInventario: 1 });
-    expect(registros.map((r) => r.noInventario)).toEqual(['IMP-REAL-1', 'IMP-REAL-2', 'IMP-REAL-3']);
-  });
-
-  test('si un No. de Inventario ya existe, reporta el error sin tumbar el resto del lote', async () => {
-    await Catalog.create({
-      categoria: 'LIBRO',
-      noInventario: 'IMP-DUPLICADO',
-      autor: 'Ya existe',
-      titulo: 'Ya existe',
-      atributos: { EDITORIAL: 'Ed', ISBN: '1', TIPO_DE_DOCUMENTO: 'Fisico' },
-      registradoPor: manager._id,
-      enviado: true,
-    });
-
-    const res = await api(app)
-      .post('/api/catalog/importar/confirmar')
-      .set('Authorization', `Bearer ${managerToken}`)
-      .send({
-        items: [
-          itemValido({ noInventario: 'IMP-DUPLICADO', titulo: 'Choca con el existente' }),
-          itemValido({ noInventario: 'IMP-CONF-4', titulo: 'Este si entra' }),
+          itemValido({ categoria: 'CATEGORIA_QUE_NO_EXISTE', titulo: 'Choca con la validacion' }),
+          itemValido({ titulo: 'Este si entra' }),
         ],
       });
 
     expect(res.status).toBe(200);
     expect(res.body.data.creados).toBe(1);
     expect(res.body.data.errores).toHaveLength(1);
-    expect(res.body.data.errores[0].titulo).toBe('Choca con el existente');
+    expect(res.body.data.errores[0].titulo).toBe('Choca con la validacion');
+
+    const entro = await Catalog.findOne({ titulo: 'Este si entra' });
+    expect(entro).not.toBeNull();
   });
 });
