@@ -85,12 +85,15 @@ export default function ApprovalsPage() {
   const [activeTab, setActiveTab] = useState(ESTADOS_REVISION.PENDIENTE);
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalRegistros, setTotalRegistros] = useState(0);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState(ORDEN_POR_DEFECTO);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
   const [seleccionados, setSeleccionados] = useState(new Set());
+  const [seleccionTodasPaginas, setSeleccionTodasPaginas] = useState(false);
+  const [cargandoSeleccionTodas, setCargandoSeleccionTodas] = useState(false);
   const [itemEnRevision, setItemEnRevision] = useState(null);
   const [decision, setDecision] = useState('APROBAR');
   const [observaciones, setObservaciones] = useState('');
@@ -123,6 +126,7 @@ export default function ApprovalsPage() {
       const res = await catalogApi.list({ estadoRevision: activeTab, page, limit: 15, sort });
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
+      setTotalRegistros(res.data.data.total);
     } catch (err) {
       setError(getErrorMessage(err, 'No se pudo cargar el listado'));
     } finally {
@@ -130,13 +134,32 @@ export default function ApprovalsPage() {
     }
   }
 
+  // Trae TODOS los pendientes que coinciden con el filtro actual, sin importar la pagina, y
+  // los marca seleccionados de una vez - asi "Aprobar/Rechazar seleccionados" puede actuar
+  // sobre todo el lote, no solo los ~15 que se ven en la pagina actual.
+  async function seleccionarTodasLasPaginas() {
+    setCargandoSeleccionTodas(true);
+    setError('');
+    try {
+      const res = await catalogApi.list({ estadoRevision: activeTab, page: 1, limit: 100000, sort });
+      setSeleccionados(new Set(res.data.data.registros.map((r) => r._id)));
+      setSeleccionTodasPaginas(true);
+    } catch (err) {
+      setError(getErrorMessage(err, 'No se pudo seleccionar todo'));
+    } finally {
+      setCargandoSeleccionTodas(false);
+    }
+  }
+
   useEffect(() => {
     cargar();
     setSeleccionados(new Set());
+    setSeleccionTodasPaginas(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, page, sort]);
 
   function toggleUno(id) {
+    setSeleccionTodasPaginas(false);
     setSeleccionados((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -146,6 +169,7 @@ export default function ApprovalsPage() {
   }
 
   function toggleTodos() {
+    setSeleccionTodasPaginas(false);
     setSeleccionados((prev) => {
       const todosSeleccionados = registros.length > 0 && registros.every((r) => prev.has(r._id));
       return todosSeleccionados ? new Set() : new Set(registros.map((r) => r._id));
@@ -187,6 +211,7 @@ export default function ApprovalsPage() {
       const res = await catalogApi.aprobarLote([...seleccionados]);
       setMensaje(`${res.data.data.aprobados} registro(s) aprobado(s) correctamente`);
       setSeleccionados(new Set());
+      setSeleccionTodasPaginas(false);
       setLoteAbierto(false);
       await cargar();
     } catch (err) {
@@ -213,6 +238,7 @@ export default function ApprovalsPage() {
       const res = await catalogApi.rechazarLote([...seleccionados], observacionesLote.trim());
       setMensaje(`${res.data.data.rechazados} registro(s) rechazado(s) correctamente`);
       setSeleccionados(new Set());
+      setSeleccionTodasPaginas(false);
       setRechazoLoteAbierto(false);
       await cargar();
     } catch (err) {
@@ -397,22 +423,46 @@ export default function ApprovalsPage() {
       <AlertBanner type="success">{mensaje}</AlertBanner>
 
       {puedeActuar && seleccionados.size > 0 ? (
-        <div className="flex items-center justify-between rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5">
-          <span className="text-sm font-medium text-primary-dark">
-            {seleccionados.size} registro{seleccionados.size === 1 ? '' : 's'} seleccionado
-            {seleccionados.size === 1 ? '' : 's'}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setSeleccionados(new Set())}>
-              Cancelar seleccion
-            </Button>
-            <Button variant="danger" icon={XCircle} onClick={abrirRechazoLote}>
-              Rechazar seleccionados
-            </Button>
-            <Button icon={ListChecks} onClick={() => setLoteAbierto(true)}>
-              Aprobar seleccionados
-            </Button>
+        <div className="flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-primary-dark">
+              {seleccionados.size} registro{seleccionados.size === 1 ? '' : 's'} seleccionado
+              {seleccionados.size === 1 ? '' : 's'}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSeleccionados(new Set());
+                  setSeleccionTodasPaginas(false);
+                }}
+              >
+                Cancelar seleccion
+              </Button>
+              <Button variant="danger" icon={XCircle} onClick={abrirRechazoLote}>
+                Rechazar seleccionados
+              </Button>
+              <Button icon={ListChecks} onClick={() => setLoteAbierto(true)}>
+                Aprobar seleccionados
+              </Button>
+            </div>
           </div>
+          {/* Sin esto, "seleccionados" solo puede llegar a los ~15 registros de la pagina
+              actual (toggleTodos solo marca lo que esta a la vista) - este boton trae el ID
+              de TODOS los pendientes que coinciden con el filtro, sin importar la pagina, para
+              que Aprobar/Rechazar seleccionados actue sobre el lote completo de una vez. */}
+          {!seleccionTodasPaginas && totalPages > 1 ? (
+            <button
+              type="button"
+              onClick={seleccionarTodasLasPaginas}
+              disabled={cargandoSeleccionTodas}
+              className="self-start text-xs font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              {cargandoSeleccionTodas
+                ? 'Seleccionando todo...'
+                : `Seleccionar los ${totalRegistros} pendientes en todas las paginas`}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

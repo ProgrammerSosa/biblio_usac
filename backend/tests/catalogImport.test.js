@@ -7,6 +7,7 @@ const { api } = require('./helpers/apiClient');
 const app = require('../server');
 const User = require('../src/users/user_model');
 const Catalog = require('../src/catalog/catalog_model');
+const Category = require('../src/catalog/category_model');
 const { hashPassword } = require('../helpers/password');
 const { generateJWT } = require('../helpers/tokens');
 const { ROLES, ESTADOS_REVISION } = require('../utils/constants');
@@ -254,6 +255,64 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
 
     const guardados = await Catalog.find({ titulo: { $in: ['Libro Uno Con Columna Vieja', 'Libro Dos Con Columna Vieja'] } });
     expect(guardados.every((g) => g.idInventario === undefined)).toBe(true);
+  });
+
+  test('si la categoria ya tiene su propio campo "Notas", la columna "Notas" del Excel llena ese campo (no se pega a Estado fisico)', async () => {
+    // Antes, la columna "Notas" del Excel siempre se pegaba al final de "Estado fisico" sin
+    // importar nada mas - eso tenia sentido cuando "Notas" no era un campo real de ninguna
+    // categoria, pero si la categoria ya definio su propio atributo "Notas" (como aqui), ese
+    // campo debe mandar: el texto va ahi, estructurado, no mezclado a ciegas con el estado
+    // fisico del ejemplar.
+    await Category.updateOne({ clave: 'LIBRO' }, { $push: { campos: { clave: 'NOTAS', etiqueta: 'Notas', requerido: false } } });
+
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento', 'Estado fisico', 'Notas']);
+    hoja.addRow(['Autor Notas', 'Libro Con Campo De Notas', 'Ed', '1', 'Fisico', 'Buen estado', 'Es el numero 5 de la coleccion']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    const item = res.body.data.hojas[0].items[0];
+    expect(item.estadoFisico).toBe('Buen estado');
+    expect(item.atributos.NOTAS).toBe('Es el numero 5 de la coleccion');
+  });
+
+  test('si la categoria ya NO tiene un campo (ej. se quito "Tipo de documento"), esa columna del Excel se avisa como desconocida en vez de fallar al confirmar', async () => {
+    // Antes, el alias fijo "tipo de documento" -> TIPO_DE_DOCUMENTO se aplicaba sin importar
+    // si la categoria todavia tenia ese campo - si ya no lo tenia (lo cambiaste por otro en
+    // Gestion de Categorias), la vista previa igual guardaba el valor ahi, y el guardado real
+    // fallaba con "el campo no aplica para la categoria" sin que la vista previa avisara nada.
+    await Category.updateOne({ clave: 'LIBRO' }, { $pull: { campos: { clave: 'TIPO_DE_DOCUMENTO' } } });
+
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Libros');
+    hoja.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento']);
+    hoja.addRow(['Autor Sin Tipo', 'Libro Sin Tipo De Documento', 'Ed', '1', 'Fisico']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const previsualizar = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(previsualizar.status).toBe(200);
+    const hoja0 = previsualizar.body.data.hojas[0];
+    expect(hoja0.camposDesconocidos).toContain('tipo de documento');
+    const item = hoja0.items[0];
+    expect(item.atributos.TIPO_DE_DOCUMENTO).toBeUndefined();
+
+    const confirmar = await api(app)
+      .post('/api/catalog/importar/confirmar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ items: [item], archivoOrigen: 'prueba.xlsx' });
+
+    expect(confirmar.body.data.creados).toBe(1);
+    expect(confirmar.body.data.errores).toHaveLength(0);
   });
 
   test('una celda con texto de formato mixto (rich text) se lee como texto plano, no como objeto', async () => {

@@ -55,7 +55,15 @@ export default function ImportPage() {
       res.data.data.hojas.forEach((hoja) => {
         todasColapsadas.add(hoja.categoria);
         hoja.items.forEach((item) => {
-          nuevaSeleccion[claveItem(hoja.categoria, item.fila)] = { incluir: item.valido, usarCopias: true };
+          // Una fila queda marcada para subir por defecto solo si esta 100% completa - ni le
+          // falta autor/titulo (item.valido) ni un campo obligatorio de la categoria
+          // (camposFaltantes, ej. "Notas" si la marcaste como obligatoria). Antes, una fila con
+          // un campo obligatorio faltante se subia igual (con "N/A") aunque mostrara la
+          // advertencia en rojo - habia que darse cuenta y desmarcarla a mano. Asi, si algo no
+          // esta completo, toca revisarla y decidir a proposito: la incluyes con N/A o
+          // cancelas, corriges el Excel y lo vuelves a subir.
+          const completo = item.valido && (!item.camposFaltantes || item.camposFaltantes.length === 0);
+          nuevaSeleccion[claveItem(hoja.categoria, item.fila)] = { incluir: completo, usarCopias: true };
         });
       });
       setHojas(res.data.data.hojas);

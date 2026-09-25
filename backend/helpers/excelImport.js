@@ -37,6 +37,11 @@ const CAMPOS_COMUNES = {
   'estado fisico': 'estadoFisico',
 };
 
+// Respaldo para categorias SIN un atributo propio de notas: si el Excel trae una columna
+// "Notas"/"Nota", su texto se pega al final de "Estado fisico" (ver mas abajo) en vez de
+// perderse. Si la categoria SI tiene su propio campo (ej. un atributo llamado "Notas" creado
+// en Gestion de Categorias), ese campo manda y esto no se usa - ver el orden de revision en
+// el loop de celdas.
 const CAMPOS_NOTAS = ['notas', 'nota'];
 
 // Columnas que existen en los Excel reales de la biblioteca pero no son un dato del material:
@@ -155,6 +160,17 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
     const encabezados = leerEncabezados(worksheet);
     const clavesAtributos = new Map(categoria.campos.map((c) => [normalizarTexto(c.etiqueta), c.clave]));
 
+    // ALIAS_ATRIBUTOS es una tabla fija de todo el sistema (ej. "tipo de documento" ->
+    // TIPO_DE_DOCUMENTO), pero no toda categoria tiene ese campo - si Folleto ya no lo tiene
+    // (lo cambiaste por "Notas" en Gestion de Categorias, por ejemplo), un Excel que todavia
+    // trae esa columna no debe intentar guardarla ahi: el modelo la rechazaria al confirmar
+    // ("el campo no aplica para la categoria"), un error que la vista previa nunca alcanzaba a
+    // mostrar. Por eso el alias solo cuenta cuando su clave de destino SI es un campo real de
+    // ESTA categoria en este momento - si no, la columna cae en "camposDesconocidos" como
+    // cualquier otra columna que no aplica, y se avisa en vez de fallar en silencio despues.
+    const clavesValidas = new Set(categoria.campos.map((c) => c.clave));
+    const aliasValidos = Object.fromEntries(Object.entries(ALIAS_ATRIBUTOS).filter(([, clave]) => clavesValidas.has(clave)));
+
     // Columnas del Excel que no caen en ningun campo conocido de esta categoria: se ignoran
     // al leer los datos, pero se avisan en la vista previa para que no se pierdan calladas -
     // el campo hay que crearlo primero en Gestion de Categorias si se quiere capturar.
@@ -163,7 +179,7 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
       ...CAMPOS_NOTAS,
       ...CAMPOS_IGNORADOS,
       ...clavesAtributos.keys(),
-      ...Object.keys(ALIAS_ATRIBUTOS),
+      ...Object.keys(aliasValidos),
     ]);
     const camposDesconocidos = [...new Set(Object.values(encabezados))].filter((h) => !conocidos.has(h));
 
@@ -195,17 +211,24 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
           datos[CAMPOS_COMUNES[encabezado]] = valor;
           return;
         }
+
+        // Si la categoria ya tiene su propio campo para esto (ej. definiste un atributo
+        // llamado "Notas" en Gestion de Categorias), ese campo manda: el valor se guarda ahi,
+        // estructurado, en vez de pegarse a ciegas al final de "Estado fisico". El pegado a
+        // Estado fisico de abajo es solo el comportamiento de respaldo para categorias que
+        // todavia NO tienen un campo propio para sus notas.
+        const claveDesdeCategoria = clavesAtributos.get(encabezado) || aliasValidos[encabezado];
+        if (claveDesdeCategoria) {
+          datos.atributos[claveDesdeCategoria] = valor;
+          return;
+        }
+
         if (CAMPOS_NOTAS.includes(encabezado)) {
           notas = String(valor).trim();
           return;
         }
         if (CAMPOS_IGNORADOS.includes(encabezado)) {
           return;
-        }
-
-        const claveDesdeCategoria = clavesAtributos.get(encabezado) || ALIAS_ATRIBUTOS[encabezado];
-        if (claveDesdeCategoria) {
-          datos.atributos[claveDesdeCategoria] = valor;
         }
       });
 
