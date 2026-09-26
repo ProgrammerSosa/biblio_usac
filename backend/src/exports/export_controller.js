@@ -210,10 +210,6 @@ const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
 const estadoRevisionTexto = (row) => (row.deBaja ? 'DB' : ESTADO_LETRAS[row.estadoRevision] || row.estadoRevision);
 const sumaAnchos = (columnas) => columnas.reduce((sum, col) => sum + col.width, 0);
 
-// Si el registro esta dado de baja o fue rechazado, "Notas" deja de mostrar el atributo libre
-// que haya escrito quien lo registro y en su lugar muestra el motivo (dar de baja) o la
-// observacion de rechazo - es el dato que de verdad importa leer ahi para ese registro, y asi
-// no hay que ir a buscarlo aparte. Para cualquier otro registro se comporta como siempre.
 // Convierte "2024" en un rango [1 ene 2024, 1 ene 2025) para filtrar por createdAt - el mismo
 // dato que muestra COLUMNA_ANIO_REGISTRO. Un valor invalido o vacio simplemente no filtra.
 function rangoDeAnio(anioTexto) {
@@ -222,6 +218,10 @@ function rangoDeAnio(anioTexto) {
   return { $gte: new Date(Date.UTC(anio, 0, 1)), $lt: new Date(Date.UTC(anio + 1, 0, 1)) };
 }
 
+// Si el registro esta dado de baja o fue rechazado, "Notas" deja de mostrar el atributo libre
+// que haya escrito quien lo registro y en su lugar muestra el motivo (dar de baja) o la
+// observacion de rechazo - es el dato que de verdad importa leer ahi para ese registro, y asi
+// no hay que ir a buscarlo aparte. Para cualquier otro registro se comporta como siempre.
 function textoNotas(row, clave) {
   if (row.deBaja) return row.motivoBaja || 'N/A';
   if (row.estadoRevision === 'RECHAZADO') return row.observaciones || 'N/A';
@@ -313,22 +313,6 @@ function construirColumnasAtributos(doc, campos, registros) {
   }));
 }
 
-// Arma una tabla principal (columnas garantizadas + tantos atributos como quepan en el
-// ancho de la hoja) y, si sobran, una o mas tablas de continuacion debajo, cada una con su
-// propio lote de columnas hasta agotarlos todos. Cada columna de atributo ya trae su ancho
-// ideal medido contra su propio dato (ver anchoIdealParaAtributo), asi que aqui solo se
-// decide CUANTAS caben completas en el espacio disponible - ninguna se aprieta por debajo de
-// lo que su contenido necesita. La continuacion no repite Titulo/ID: como el bloque de un
-// registro nunca se corta entre paginas, su fila de continuacion siempre queda pegada justo
-// debajo de la principal, asi que repetir el titulo ahi solo duplicaba el dato sin ayudar a
-// identificar nada.
-//
-// "Notas" va garantizado en la fila principal (ver esCampoNotas), pero al final de todo -
-// despues incluso de los atributos que si cupieron - para que sea lo ultimo que se lee de
-// cada registro. "Estado fisico" compite por espacio como un atributo mas: "Notas" puede ser
-// texto largo que conviene compartir alto con el titulo/autor, y "Estado fisico" casi siempre
-// es corto ("Buen estado", "Regular"), asi que sufre menos si le toca la fila de continuacion
-// cuando el espacio no alcanza para todo.
 // Reparte el sobrante entre las columnas de un lote respetando el tope de cada una - pero a
 // diferencia de un simple "a cada quien le toca sobrante/n", lo hace en rondas: si el tope de
 // una columna no le deja usar toda su parte pareja, lo que le sobro a ELLA se vuelve a repartir
@@ -354,6 +338,22 @@ function repartirSobrante(lote, sobranteInicial) {
   }
 }
 
+// Arma una tabla principal (columnas garantizadas + tantos atributos como quepan en el
+// ancho de la hoja) y, si sobran, una o mas tablas de continuacion debajo, cada una con su
+// propio lote de columnas hasta agotarlos todos. Cada columna de atributo ya trae su ancho
+// ideal medido contra su propio dato (ver anchoIdealParaAtributo), asi que aqui solo se
+// decide CUANTAS caben completas en el espacio disponible - ninguna se aprieta por debajo de
+// lo que su contenido necesita. La continuacion no repite Titulo/ID: como el bloque de un
+// registro nunca se corta entre paginas, su fila de continuacion siempre queda pegada justo
+// debajo de la principal, asi que repetir el titulo ahi solo duplicaba el dato sin ayudar a
+// identificar nada.
+//
+// "Notas" va garantizado en la fila principal (ver esCampoNotas), pero al final de todo -
+// despues incluso de los atributos que si cupieron - para que sea lo ultimo que se lee de
+// cada registro. "Estado fisico" compite por espacio como un atributo mas: "Notas" puede ser
+// texto largo que conviene compartir alto con el titulo/autor, y "Estado fisico" casi siempre
+// es corto ("Buen estado", "Regular"), asi que sufre menos si le toca la fila de continuacion
+// cuando el espacio no alcanza para todo.
 function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
   const { opcionales: comunesActivos, estadoRevision, estadoFisico } = columnasComunesActivas(doc, categoriaDoc, filas);
   const columnasFijas = COLUMNAS_FIJAS();
