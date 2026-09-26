@@ -4,12 +4,6 @@ const AuditArchive = require('../src/audit/auditArchive_model');
 const DIAS_ANTES_DE_ARCHIVAR = 30;
 const INTERVALO_MS = 24 * 60 * 60 * 1000; // revisa una vez al dia
 
-/**
- * Mueve a AuditArchive las entradas de auditoria de mas de 30 dias, para que la
- * coleccion Audit (la que se consulta a diario) no crezca sin limite. No se
- * borra nada de verdad: lo archivado sigue disponible en la pestaña "Archivo"
- * de Auditoria, solo que fuera de la coleccion "en caliente".
- */
 async function archivarAuditoriaVieja() {
   const limite = new Date(Date.now() - DIAS_ANTES_DE_ARCHIVAR * 24 * 60 * 60 * 1000);
   const viejos = await Audit.find({ fecha: { $lt: limite } });

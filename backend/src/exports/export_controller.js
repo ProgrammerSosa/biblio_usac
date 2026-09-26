@@ -4,10 +4,10 @@ const Category = require('../catalog/category_model');
 const { filtroVisibilidadBorradores } = require('../catalog/catalog_controller');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants');
-const { drawTable, DANGER_TEXT } = require('../../helpers/pdfTable');
+const { drawTable, DANGER_TEXT, GRIS_BAJA_FONDO, ROJO_RECHAZO_FONDO } = require('../../helpers/pdfTable');
 const { resolverOrden } = require('../../helpers/catalogSort');
 const { escapeRegExp } = require('../../helpers/regex');
-const { claveDeGrupo } = require('../../helpers/catalogGroup');
+const { claveDeGrupo, normalizarTexto } = require('../../helpers/catalogGroup');
 const { fail } = require('../../utils/httpResponse');
 
 const ESTADO_LABELS = {
@@ -16,9 +16,37 @@ const ESTADO_LABELS = {
   RECHAZADO: 'Rechazado',
 };
 
-// Tamaño oficio (8.5" x 13") en puntos, para tener mas ancho que A4 y que quepan
-// mas columnas de atributos antes de necesitar una tabla de continuacion.
-const TAMANO_PAGINA_OFICIO = [612, 936];
+// En la columna Estado del reporte se usa una sola letra (para que quepa mas en una fila) en
+// vez de la palabra completa - se explica en la leyenda del encabezado (dibujarLeyendaColores).
+// "DB" manda sobre lo que sea que diga estadoRevision: un registro dado de baja siempre fue
+// Aprobado antes, pero para el reporte lo que importa mostrar es que ya no esta disponible.
+const ESTADO_LETRAS = {
+  PENDIENTE: 'P',
+  APROBADO: 'A',
+  RECHAZADO: 'D',
+};
+
+// Tamaño oficio (8.5" x 14") en puntos.
+const TAMANO_PAGINA_OFICIO = [612, 1008];
+const CM_A_PUNTOS = 28.3465;
+
+// Margen vertical (arriba/abajo): 1cm - deja el bloque de encabezado (titulo, filtros,
+// leyenda) en unos 4.5cm y la tabla en unos 15cm de alto, que es justo lo que pidio el
+// usuario al medir el PDF ya impreso.
+const MARGEN_VERTICAL = 1 * CM_A_PUNTOS;
+
+// Margen horizontal: el que le queda al ancho de la hoja (1008pt, 35.6cm en landscape) para
+// que la tabla mida exactamente 30cm de ancho - no es el mismo valor que el margen vertical a
+// proposito, es mas grande, para no repetir el error anterior de calcular a partir de datos sin
+// confirmar contra lo que salio impreso de verdad. Izquierda y derecha ya NO son iguales: todo
+// el bloque se corrio 1cm a la izquierda (izquierda 1cm menos, derecha 1cm mas) sin cambiar el
+// ancho total de la tabla, tambien a pedido del usuario tras probarlo impreso.
+const ANCHO_HOJA_PT = TAMANO_PAGINA_OFICIO[1];
+const ANCHO_TABLA_DESEADO_PT = 30 * CM_A_PUNTOS;
+const MARGEN_HORIZONTAL_BASE = (ANCHO_HOJA_PT - ANCHO_TABLA_DESEADO_PT) / 2;
+const CORRIMIENTO_IZQUIERDA = 1 * CM_A_PUNTOS;
+const MARGEN_IZQUIERDO = MARGEN_HORIZONTAL_BASE - CORRIMIENTO_IZQUIERDA;
+const MARGEN_DERECHO = MARGEN_HORIZONTAL_BASE + CORRIMIENTO_IZQUIERDA;
 
 // Ancho minimo/maximo de cada columna de atributo: por debajo del minimo el texto
 // deja de ser legible aunque haga salto de linea; el maximo evita que una columna con
@@ -81,18 +109,59 @@ const COLUMNA_ID = (coloresPorRegistro) => ({
 
 const COLUMNAS_FIJAS = () => [{ key: 'titulo', header: 'Título', width: 140 }, { key: 'autor', header: 'Autor', width: 95 }];
 
+// Año en que el registro se creo en el sistema (no confundir con "Año", que es el año de
+// publicacion del material y es un dato que se escribe a mano). Sale de createdAt, que
+// Mongoose ya pone solo (timestamps: true) - por eso va como columna fija siempre visible,
+// igual que Estado, y no como un campo comun mas que cada categoria pueda apagar.
+const COLUMNA_ANIO_REGISTRO = () => ({
+  key: 'anioRegistro',
+  header: 'Año reg.',
+  width: 40,
+  align: 'center',
+  render: (row) => (row.createdAt ? new Date(row.createdAt).getFullYear() : 'N/A'),
+});
+
+// Sigla de 3 letras para los idiomas mas comunes en la biblioteca - se busca por el nombre
+// normalizado (sin acentos, minuscula) para que "Español"/"español"/"Espanol" den lo mismo.
+// Un idioma que no este en la tabla simplemente usa sus primeras 3 letras en mayuscula, para
+// no dejar la celda vacia ni tener que actualizar esta lista para cada idioma nuevo que
+// aparezca.
+const ABREVIATURAS_IDIOMA = {
+  espanol: 'ESP',
+  ingles: 'ING',
+  frances: 'FRA',
+  aleman: 'ALE',
+  italiano: 'ITA',
+  portugues: 'POR',
+  latin: 'LAT',
+  ruso: 'RUS',
+  chino: 'CHI',
+  japones: 'JAP',
+  arabe: 'ARA',
+  bilingue: 'BIL',
+};
+
+function abreviarIdioma(idioma) {
+  const texto = String(idioma || '').trim();
+  if (!texto) return 'N/A';
+  const abreviatura = ABREVIATURAS_IDIOMA[normalizarTexto(texto)];
+  return abreviatura || texto.slice(0, 3).toUpperCase();
+}
+
 // "idioma", "anio", "edicion", "lugar" y "paginasImpresas" son campos comunes del
 // catalogo (existen para cualquier categoria, ver catalog_model.js) y no campos
 // propios de la categoria (esos van en categoriaDoc.campos) - por eso antes no
 // salian en el PDF: construirColumnas solo recorria categoriaDoc.campos. Cada
 // categoria puede apagar cualquiera de estos desde Gestion de Categorias
 // (camposComunesDesactivados), asi que el reporte debe respetar esa misma regla.
+// Idioma, Estado y Paginas salen abreviados (sigla de 3 letras, letra unica, "Pag.") a
+// proposito - la meta es que un registro use una sola fila lo mas seguido posible.
 const CAMPOS_COMUNES_OPCIONALES = [
-  { clave: 'idioma', key: 'idioma', header: 'Idioma', width: 55 },
+  { clave: 'idioma', key: 'idioma', header: 'Idioma', width: 32, render: (row) => abreviarIdioma(row.idioma) },
   { clave: 'anio', key: 'anio', header: 'Año', width: 40 },
   { clave: 'edicion', key: 'edicion', header: 'Edición', width: 65 },
   { clave: 'lugar', key: 'lugar', header: 'Lugar', width: 75 },
-  { clave: 'paginasImpresas', key: 'paginasImpresas', header: 'Páginas', width: 50 },
+  { clave: 'paginasImpresas', key: 'paginasImpresas', header: 'Pag.', width: 35 },
 ];
 
 // Estado fisico casi siempre es un dato corto ("Buen estado", "Regular", "Hojas manchadas"),
@@ -102,7 +171,7 @@ const CAMPOS_COMUNES_OPCIONALES = [
 // linea en su celda en vez de ensanchar la columna entera.
 const ANCHO_MAX_ESTADO_FISICO = Math.round(ANCHO_MAX_ATRIBUTO / 2);
 
-const COLUMNA_ESTADO_REVISION = () => ({ key: 'estadoRevision', header: 'Estado', width: 65, render: estadoRevisionTexto });
+const COLUMNA_ESTADO_REVISION = () => ({ key: 'estadoRevision', header: 'Est.', width: 28, align: 'center', render: estadoRevisionTexto });
 const COLUMNA_ESTADO_FISICO = (doc, registros) => ({
   clave: 'estadoFisico',
   key: 'estadoFisico',
@@ -138,36 +207,67 @@ function esCampoNotas(campo) {
 
 const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT : null);
 const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
-const estadoRevisionTexto = (row) => ESTADO_LABELS[row.estadoRevision] || row.estadoRevision;
+const estadoRevisionTexto = (row) => (row.deBaja ? 'DB' : ESTADO_LETRAS[row.estadoRevision] || row.estadoRevision);
 const sumaAnchos = (columnas) => columnas.reduce((sum, col) => sum + col.width, 0);
 
-// Leyenda de colores justo debajo de los filtros, con muestras de color de verdad (no solo el
-// nombre) para que quede claro de un vistazo que azul/rojo alternado = ejemplar y amarillo
-// palido = copia, sin tener que adivinar ni perderse al leer la tabla.
+// Si el registro esta dado de baja o fue rechazado, "Notas" deja de mostrar el atributo libre
+// que haya escrito quien lo registro y en su lugar muestra el motivo (dar de baja) o la
+// observacion de rechazo - es el dato que de verdad importa leer ahi para ese registro, y asi
+// no hay que ir a buscarlo aparte. Para cualquier otro registro se comporta como siempre.
+// Convierte "2024" en un rango [1 ene 2024, 1 ene 2025) para filtrar por createdAt - el mismo
+// dato que muestra COLUMNA_ANIO_REGISTRO. Un valor invalido o vacio simplemente no filtra.
+function rangoDeAnio(anioTexto) {
+  const anio = parseInt(anioTexto, 10);
+  if (!anioTexto || Number.isNaN(anio)) return null;
+  return { $gte: new Date(Date.UTC(anio, 0, 1)), $lt: new Date(Date.UTC(anio + 1, 0, 1)) };
+}
+
+function textoNotas(row, clave) {
+  if (row.deBaja) return row.motivoBaja || 'N/A';
+  if (row.estadoRevision === 'RECHAZADO') return row.observaciones || 'N/A';
+  return (row.atributos && row.atributos[clave]) || 'N/A';
+}
+
+// Leyenda debajo de los filtros: colores del ID con muestra de color de verdad (no solo el
+// nombre) y que significa cada letra de la columna Estado - para que quede claro de un vistazo
+// sin tener que adivinar ni perderse al leer la tabla.
 function dibujarLeyendaColores(doc, x, y) {
   const ladoMuestra = 9;
-  const etiqueta = 'Colores del ID (alterna por material): ';
 
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#475569').text(etiqueta, x, y - 1);
-  let cursorX = x + doc.widthOfString(etiqueta) + 4;
+  function dibujarFila(yFila, etiqueta, items) {
+    doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#475569').text(etiqueta, x, yFila - 1);
+    let cursorX = x + doc.widthOfString(etiqueta) + 4;
 
-  const items = [
+    doc.font('Helvetica').fontSize(7.5);
+    items.forEach((item) => {
+      if (item.color) {
+        doc.rect(cursorX, yFila, ladoMuestra, ladoMuestra).fill(item.color);
+        doc.strokeColor('#94a3b8').lineWidth(0.5).rect(cursorX, yFila, ladoMuestra, ladoMuestra).stroke();
+        cursorX += ladoMuestra + 3;
+      }
+      doc.fillColor('#475569').text(item.texto, cursorX, yFila - 1);
+      cursorX += doc.widthOfString(item.texto) + 14;
+    });
+
+    return yFila + ladoMuestra + 6;
+  }
+
+  let cursorY = dibujarFila(y, 'Colores del ID (alterna por material): ', [
     { color: COLOR_EJEMPLAR_A.fondo, texto: 'Ejemplar' },
     { color: COLOR_EJEMPLAR_B.fondo, texto: 'Ejemplar' },
     { color: COLOR_COPIA.fondo, texto: 'Copia (mismo material, otro ejemplar fisico)' },
-  ];
+    { color: GRIS_BAJA_FONDO, texto: 'Dado de baja (fila completa, texto tachado)' },
+    { color: ROJO_RECHAZO_FONDO, texto: 'Rechazado (fila completa)' },
+  ]);
 
-  doc.font('Helvetica').fontSize(7.5);
-  items.forEach((item) => {
-    doc.rect(cursorX, y, ladoMuestra, ladoMuestra).fill(item.color);
-    doc.strokeColor('#94a3b8').lineWidth(0.5).rect(cursorX, y, ladoMuestra, ladoMuestra).stroke();
-    cursorX += ladoMuestra + 3;
+  cursorY = dibujarFila(cursorY, 'Estado: ', [
+    { texto: 'A = Aprobado' },
+    { texto: 'D = Rechazado' },
+    { texto: 'P = Pendiente' },
+    { texto: 'DB = Dado de baja' },
+  ]);
 
-    doc.fillColor('#475569').text(item.texto, cursorX, y - 1);
-    cursorX += doc.widthOfString(item.texto) + 14;
-  });
-
-  return y + ladoMuestra + 6;
+  return cursorY;
 }
 
 function nombreArchivoPdf() {
@@ -223,11 +323,37 @@ function construirColumnasAtributos(doc, campos, registros) {
 // debajo de la principal, asi que repetir el titulo ahi solo duplicaba el dato sin ayudar a
 // identificar nada.
 //
-// "Notas" va garantizado en la fila principal (ver esCampoNotas) y "Estado fisico" pasa a
-// competir por espacio como un atributo mas - es lo opuesto al orden de antes, pero tiene mas
-// sentido: "Notas" puede ser texto largo que conviene compartir alto con el titulo/autor, y
-// "Estado fisico" casi siempre es corto ("Buen estado", "Regular"), asi que sufre menos si le
-// toca la fila de continuacion cuando el espacio no alcanza para todo.
+// "Notas" va garantizado en la fila principal (ver esCampoNotas), pero al final de todo -
+// despues incluso de los atributos que si cupieron - para que sea lo ultimo que se lee de
+// cada registro. "Estado fisico" compite por espacio como un atributo mas: "Notas" puede ser
+// texto largo que conviene compartir alto con el titulo/autor, y "Estado fisico" casi siempre
+// es corto ("Buen estado", "Regular"), asi que sufre menos si le toca la fila de continuacion
+// cuando el espacio no alcanza para todo.
+// Reparte el sobrante entre las columnas de un lote respetando el tope de cada una - pero a
+// diferencia de un simple "a cada quien le toca sobrante/n", lo hace en rondas: si el tope de
+// una columna no le deja usar toda su parte pareja, lo que le sobro a ELLA se vuelve a repartir
+// entre las que todavia tengan espacio, en vez de perderse. Sin esto, una sola columna ya cerca
+// de su tope (ej. Estado fisico, con un tope bajo) le "robaba" sobrante a las demas sin poder
+// usarlo, y ese pedazo quedaba en blanco aunque otra columna del mismo lote si lo hubiera
+// podido aprovechar.
+function repartirSobrante(lote, sobranteInicial) {
+  let sobrante = sobranteInicial;
+  let candidatas = lote.filter((c) => c.width < (c.anchoMaximo ?? ANCHO_MAX_ATRIBUTO));
+
+  while (sobrante > 0.01 && candidatas.length > 0) {
+    const bonoPorColumna = sobrante / candidatas.length;
+    let usado = 0;
+    candidatas.forEach((c) => {
+      const tope = c.anchoMaximo ?? ANCHO_MAX_ATRIBUTO;
+      const bono = Math.min(bonoPorColumna, tope - c.width);
+      c.width += bono;
+      usado += bono;
+    });
+    sobrante -= usado;
+    candidatas = candidatas.filter((c) => c.width < (c.anchoMaximo ?? ANCHO_MAX_ATRIBUTO));
+  }
+}
+
 function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
   const { opcionales: comunesActivos, estadoRevision, estadoFisico } = columnasComunesActivas(doc, categoriaDoc, filas);
   const columnasFijas = COLUMNAS_FIJAS();
@@ -235,16 +361,24 @@ function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
 
   const campoNotas = camposCategoria.find(esCampoNotas);
   const otrosCampos = camposCategoria.filter((c) => c !== campoNotas);
-  const columnaNotas = campoNotas ? construirColumnasAtributos(doc, [campoNotas], filas)[0] : null;
+  const columnaNotas = campoNotas
+    ? { ...construirColumnasAtributos(doc, [campoNotas], filas)[0], render: (row) => textoNotas(row, campoNotas.clave) }
+    : null;
+  const columnasNotasFinal = columnaNotas ? [columnaNotas] : [];
 
-  const columnasGarantizadas = [...columnasFijas, ...comunesActivos, ...(columnaNotas ? [columnaNotas] : []), estadoRevision];
+  const columnasGarantizadas = [...columnasFijas, ...comunesActivos, estadoRevision, COLUMNA_ANIO_REGISTRO()];
   const columnasOverflow = [...construirColumnasAtributos(doc, otrosCampos, filas), ...(estadoFisico ? [estadoFisico] : [])];
 
   if (columnasOverflow.length === 0) {
-    return [columnasGarantizadas];
+    // Sin atributos que reparar en una fila de continuacion, "Notas" (si la categoria la
+    // tiene) es la unica columna de esta fila que puede aprovechar el espacio que sobre -
+    // antes esto se saltaba por completo y todo lo que sobraba quedaba en blanco.
+    const sobrante = anchoDisponible - sumaAnchos(columnasGarantizadas) - sumaAnchos(columnasNotasFinal);
+    if (sobrante > 0 && columnasNotasFinal.length > 0) repartirSobrante(columnasNotasFinal, sobrante);
+    return [[...columnasGarantizadas, ...columnasNotasFinal]];
   }
 
-  const anchoBase = sumaAnchos(columnasGarantizadas);
+  const anchoBase = sumaAnchos(columnasGarantizadas) + sumaAnchos(columnasNotasFinal);
 
   // Se ordenan de mas angosta a mas ancha antes de repartir: para "cuantas entran completas
   // en el espacio que queda" (no cuanto VALEN, solo cuantas caben), empezar por las mas
@@ -276,23 +410,15 @@ function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
     // era el bug: una columna angosta terminaba "inflada" y le tapaba el lugar a la que
     // seguia, en vez de dejarla entrar). Solo en el ultimo lote no hay a quien cederle el
     // espacio, asi que ahi si tiene sentido repartirlo para no dejar un hueco en blanco.
+    // "Notas" entra al reparto solo cuando este lote es el primer grupo (es la unica vez que
+    // va pegada a el, ver mas abajo) - si no, ya se dibujo en un grupo anterior y su ancho
+    // quedo fijo.
     if (restantes.length === 0) {
       const sobrante = anchoLibre - anchoUsado;
-      if (sobrante > 0) {
-        // Cada columna respeta su propio tope (ej. Estado fisico no pasa de
-        // ANCHO_MAX_ESTADO_FISICO aunque sobre espacio de mas) - no todas pueden
-        // estirarse hasta el mismo maximo generico.
-        const conEspacio = lote.filter((c) => c.width < (c.anchoMaximo ?? ANCHO_MAX_ATRIBUTO));
-        if (conEspacio.length > 0) {
-          const bonoPorColumna = sobrante / conEspacio.length;
-          conEspacio.forEach((c) => {
-            c.width = Math.min(c.anchoMaximo ?? ANCHO_MAX_ATRIBUTO, c.width + bonoPorColumna);
-          });
-        }
-      }
+      if (sobrante > 0) repartirSobrante(esPrimerGrupo ? [...lote, ...columnasNotasFinal] : lote, sobrante);
     }
 
-    grupos.push(esPrimerGrupo ? [...columnasGarantizadas, ...lote] : lote);
+    grupos.push(esPrimerGrupo ? [...columnasGarantizadas, ...lote, ...columnasNotasFinal] : lote);
     esPrimerGrupo = false;
   }
 
@@ -312,12 +438,18 @@ function agruparPorCategoria(registros) {
 
 async function exportCatalogPdf(req, res, next) {
   try {
-    const { estadoRevision, categoria, buscar, registradoPor, sort } = req.query;
+    const { estadoRevision, categoria, buscar, registradoPor, anioRegistro, sort } = req.query;
 
     const filtro = { eliminado: false };
-    if (estadoRevision) filtro.estadoRevision = estadoRevision;
+    if (estadoRevision === 'DE_BAJA') {
+      filtro.deBaja = true;
+    } else if (estadoRevision) {
+      filtro.estadoRevision = estadoRevision;
+    }
     if (categoria) filtro.categoria = categoria;
     if (registradoPor) filtro.registradoPor = registradoPor;
+    const rangoAnioRegistro = rangoDeAnio(anioRegistro);
+    if (rangoAnioRegistro) filtro.createdAt = rangoAnioRegistro;
 
     // Cualquier rol puede exportar (antes solo Admin/Manager), asi que el export tiene que
     // respetar la misma regla de visibilidad de borradores que la lista: un borrador sin
@@ -358,7 +490,11 @@ async function exportCatalogPdf(req, res, next) {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoPdf()}"`);
 
-    const doc = new PDFDocument({ margin: 40, size: TAMANO_PAGINA_OFICIO, layout: 'landscape' });
+    const doc = new PDFDocument({
+      margins: { top: MARGEN_VERTICAL, bottom: MARGEN_VERTICAL, left: MARGEN_IZQUIERDO, right: MARGEN_DERECHO },
+      size: TAMANO_PAGINA_OFICIO,
+      layout: 'landscape',
+    });
     doc.pipe(res);
 
     doc
@@ -373,8 +509,10 @@ async function exportCatalogPdf(req, res, next) {
       .fillColor('#475569')
       .text(
         `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoria || 'todas'}, estado=${
-          estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
-        }${buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''}  |  Total: ${registros.length}`
+          estadoRevision === 'DE_BAJA' ? 'De baja' : estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
+        }${rangoAnioRegistro ? `, año de registro=${anioRegistro}` : ''}${
+          buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''
+        }  |  Total: ${registros.length}`
       );
     doc.moveDown(0.4);
     doc.y = dibujarLeyendaColores(doc, doc.page.margins.left, doc.y);
@@ -384,18 +522,17 @@ async function exportCatalogPdf(req, res, next) {
       const filas = grupos.get(categoriaDoc.clave) || [];
       if (filas.length === 0) continue;
 
-      doc
-        .fillColor('#0f172a')
-        .font('Helvetica-Bold')
-        .fontSize(11)
-        .text(`${categoriaDoc.nombre} (${filas.length})`, doc.page.margins.left, doc.y);
-      doc.moveDown(0.3);
-
       // El ancho de la columna ID se resta aparte porque ya no es una columna mas de
       // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
       const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right - ANCHO_ID;
       const gruposColumnas = construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas);
-      drawTable(doc, { x: doc.page.margins.left, columnGroups: gruposColumnas, rows: filas, idColumn: COLUMNA_ID(coloresPorRegistro) });
+      drawTable(doc, {
+        x: doc.page.margins.left,
+        columnGroups: gruposColumnas,
+        rows: filas,
+        idColumn: COLUMNA_ID(coloresPorRegistro),
+        tituloCategoria: `${categoriaDoc.nombre} (${filas.length})`,
+      });
       doc.moveDown(1);
     }
 
@@ -408,6 +545,7 @@ async function exportCatalogPdf(req, res, next) {
 module.exports = {
   exportCatalogPdf,
   construirGruposColumnas,
+  repartirSobrante,
   calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,
   ANCHO_MAX_ATRIBUTO,
@@ -416,4 +554,9 @@ module.exports = {
   COLOR_EJEMPLAR_A,
   COLOR_EJEMPLAR_B,
   COLOR_COPIA,
+  TAMANO_PAGINA_OFICIO,
+  MARGEN_VERTICAL,
+  MARGEN_IZQUIERDO,
+  MARGEN_DERECHO,
+  CM_A_PUNTOS,
 };

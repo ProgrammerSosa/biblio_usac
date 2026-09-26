@@ -33,6 +33,11 @@ export default function CatalogDetailFields({ item, ocultarRevision = false }) {
           ) : null}
         </>
       ) : null}
+      {item.deBaja ? (
+        <div className="col-span-full">
+          <DetalleCampo label="Motivo de baja" valor={item.motivoBaja} destacado />
+        </div>
+      ) : null}
     </div>
   );
 }

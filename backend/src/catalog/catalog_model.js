@@ -72,6 +72,19 @@ const catalogSchema = new mongoose.Schema(
     },
 
     eliminado: { type: Boolean, default: false },
+
+    // "Dar de baja" es distinto de eliminar: el registro se queda visible (en el catalogo y
+    // en los reportes, marcado en gris) para dejar constancia de que ese ejemplar existio y
+    // ya no esta disponible (se perdio, se dono, se destruyo, etc.) - eliminar en cambio lo
+    // oculta de todo. Solo Admin/Manager pueden darlo de baja (ver catalog_controller.js).
+    deBaja: { type: Boolean, default: false },
+    motivoBaja: { type: String, trim: true },
+    fechaBaja: { type: Date, default: null },
+    dadoDeBajaPor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
   },
   { timestamps: true }
 );

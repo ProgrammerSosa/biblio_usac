@@ -393,6 +393,136 @@ describe('Copias detectadas automaticamente al registrar (sin ninguna accion ext
   });
 });
 
+describe('Dar de baja (distinto de eliminar - el registro se queda visible)', () => {
+  test('Admin puede dar de baja un registro Aprobado, con motivo obligatorio', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const sinMotivo = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+    expect(sinMotivo.status).toBe(400);
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ motivo: 'Se dono a la biblioteca municipal' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.deBaja).toBe(true);
+    expect(res.body.data.motivoBaja).toBe('Se dono a la biblioteca municipal');
+    expect(res.body.data.fechaBaja).not.toBeNull();
+    expect(res.body.data.dadoDeBajaPor).toBe(admin._id.toString());
+
+    // Sigue visible (no se oculta como al eliminar).
+    const listado = await api(app).get('/api/catalog').set('Authorization', `Bearer ${adminToken}`);
+    expect(listado.body.data.registros.map((r) => r._id)).toContain(creado.body.data._id);
+
+    const auditoria = await Audit.findOne({ accion: ACCIONES_AUDITORIA.DAR_DE_BAJA, entidadId: creado.body.data._id });
+    expect(auditoria).not.toBeNull();
+  });
+
+  test('un Auxiliar no puede dar de baja', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ motivo: 'Se perdio' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('no se puede dar de baja un registro que sigue Pendiente', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+
+    const res = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ motivo: 'Motivo cualquiera' });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('no se puede dar de baja dos veces el mismo registro', async () => {
+    const creado = await crearYEnviar(userToken, libroValido());
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+    await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ motivo: 'Primera baja' });
+
+    const segunda = await api(app)
+      .patch(`/api/catalog/${creado.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ motivo: 'Segunda baja' });
+
+    expect(segunda.status).toBe(409);
+  });
+
+  test('el filtro estadoRevision=DE_BAJA en el listado muestra solo los dados de baja', async () => {
+    const activo = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Activo' });
+    await api(app)
+      .patch(`/api/catalog/${activo.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+
+    const deBaja = await crearYEnviar(userToken, { ...libroValido(), titulo: 'De baja' });
+    await api(app)
+      .patch(`/api/catalog/${deBaja.body.data._id}/revisar`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ decision: 'APROBAR' });
+    await api(app)
+      .patch(`/api/catalog/${deBaja.body.data._id}/dar-de-baja`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ motivo: 'Se dono' });
+
+    const res = await api(app)
+      .get('/api/catalog')
+      .query({ estadoRevision: 'DE_BAJA' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    const ids = res.body.data.registros.map((r) => r._id);
+    expect(ids).toContain(deBaja.body.data._id);
+    expect(ids).not.toContain(activo.body.data._id);
+    expect(res.body.data.registros.every((r) => r.deBaja === true)).toBe(true);
+  });
+
+  test('el filtro anioRegistro en el listado muestra solo lo creado ese año (createdAt, no el año de publicacion)', async () => {
+    const viejo = await Catalog.create({
+      ...libroValido(),
+      titulo: 'Registrado en 2020',
+      registradoPor: admin._id,
+      enviado: true,
+      estadoRevision: ESTADOS_REVISION.APROBADO,
+      createdAt: new Date('2020-05-01T00:00:00.000Z'),
+    });
+    const reciente = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Registrado ahora' });
+
+    const res = await api(app)
+      .get('/api/catalog')
+      .query({ anioRegistro: '2020' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    const ids = res.body.data.registros.map((r) => r._id);
+    expect(ids).toContain(viejo._id.toString());
+    expect(ids).not.toContain(reciente.body.data._id);
+  });
+});
+
 describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
   test('un registro recien creado no tiene ID de inventario todavia', async () => {
     const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido());

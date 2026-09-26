@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers, Send, FileSpreadsheet } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers, Send, FileSpreadsheet, Archive } from 'lucide-react';
 import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
@@ -13,11 +13,17 @@ import Button from '../../shared/components/Button';
 import Pagination from '../../shared/components/Pagination';
 import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
-import { Select } from '../../shared/components/FormField';
+import { Select, Textarea } from '../../shared/components/FormField';
 import CatalogDetailFields from './CatalogDetailFields';
 import { agruparRegistros } from '../../shared/utils/catalogGrouping';
 
 const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'danger' };
+
+// Años para el filtro "Año de registro" (cuando se creo el registro, no el de publicacion):
+// del año actual hacia atras, suficiente para cubrir el historial de la biblioteca sin tener
+// que consultar al backend solo para saber que años existen.
+const ANIO_ACTUAL = new Date().getFullYear();
+const aniosRegistro = Array.from({ length: 15 }, (_, i) => ANIO_ACTUAL - i);
 
 function RegistradoPor({ item }) {
   if (item.origenImportacion) {
@@ -48,10 +54,24 @@ function nombreArchivoPdf() {
 }
 
 function EstadoOBorrador({ item }) {
+  if (item.deBaja) {
+    return (
+      <Badge tone="neutral" icon={Archive}>
+        De baja
+      </Badge>
+    );
+  }
   if (!item.enviado) {
     return <Badge tone="warning">Borrador</Badge>;
   }
   return <EstadoRevisionBadge estado={item.estadoRevision} />;
+}
+
+// Solo tiene sentido dar de baja algo que de verdad estuvo en el inventario (Aprobado) y que
+// todavia no este dado de baja - mismo criterio que valida el backend, para no ofrecer el
+// boton en un caso que el servidor va a rechazar de todas formas.
+function puedeDarDeBaja(item, rol) {
+  return [ROLES.ADMIN, ROLES.MANAGER].includes(rol) && item.estadoRevision === ESTADOS_REVISION.APROBADO && !item.deBaja;
 }
 
 function ResumenEstadoRevision({ copias }) {
@@ -61,32 +81,42 @@ function ResumenEstadoRevision({ copias }) {
 
   const cuenta = {};
   copias.forEach((c) => {
-    const clave = c.enviado ? c.estadoRevision : 'BORRADOR';
+    const clave = c.deBaja ? 'DE_BAJA' : c.enviado ? c.estadoRevision : 'BORRADOR';
     cuenta[clave] = (cuenta[clave] || 0) + 1;
   });
   const distintos = Object.keys(cuenta);
 
-  if (distintos.length === 1 && distintos[0] !== 'BORRADOR') {
+  if (distintos.length === 1 && distintos[0] !== 'BORRADOR' && distintos[0] !== 'DE_BAJA') {
     return <EstadoRevisionBadge estado={distintos[0]} />;
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {distintos.map((estado) =>
-        estado === 'BORRADOR' ? (
-          <Badge key={estado} tone="warning">
-            {cuenta[estado]} Borrador
-          </Badge>
-        ) : (
+      {distintos.map((estado) => {
+        if (estado === 'BORRADOR') {
+          return (
+            <Badge key={estado} tone="warning">
+              {cuenta[estado]} Borrador
+            </Badge>
+          );
+        }
+        if (estado === 'DE_BAJA') {
+          return (
+            <Badge key={estado} tone="neutral" icon={Archive}>
+              {cuenta[estado]} de baja
+            </Badge>
+          );
+        }
+        return (
           <Badge key={estado} tone={TONO_ESTADO[estado] || 'neutral'}>
             {cuenta[estado]} {ESTADO_REVISION_LABELS[estado]}
           </Badge>
-        )
-      )}
+        );
+      })}
     </div>
   );
 }
 
-function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
+function ListaCopias({ copias, puedeEditar, esManager, rol, onEliminar, onEnviar, onDarDeBaja }) {
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <table className="w-full text-left text-sm">
@@ -119,6 +149,7 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
                 {copia.estadoRevision === ESTADOS_REVISION.RECHAZADO && copia.observaciones ? (
                   <p className="mt-1 text-xs text-secondary">{copia.observaciones}</p>
                 ) : null}
+                {copia.deBaja && copia.motivoBaja ? <p className="mt-1 text-xs text-slate-500">{copia.motivoBaja}</p> : null}
               </td>
               <td className="px-3 py-2">
                 <RegistradoPor item={copia} />
@@ -134,6 +165,11 @@ function ListaCopias({ copias, puedeEditar, esManager, onEliminar, onEnviar }) {
                     <Link to={`/catalogo/${copia._id}/editar`} className="text-primary hover:text-primary-light" title="Editar">
                       <Pencil size={16} />
                     </Link>
+                  ) : null}
+                  {puedeDarDeBaja(copia, rol) ? (
+                    <button onClick={() => onDarDeBaja(copia)} className="text-slate-500 hover:text-slate-700" title="Dar de baja">
+                      <Archive size={16} />
+                    </button>
                   ) : null}
                   {esManager ? (
                     <button onClick={() => onEliminar(copia)} className="text-secondary hover:text-red-700" title="Eliminar">
@@ -158,6 +194,7 @@ export default function CatalogListPage() {
   const [page, setPage] = useState(1);
   const [categoria, setCategoria] = useState('');
   const [estadoRevision, setEstadoRevision] = useState('');
+  const [anioRegistro, setAnioRegistro] = useState('');
   const [sort, setSort] = useState(ORDEN_POR_DEFECTO);
   const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
@@ -171,6 +208,10 @@ export default function CatalogListPage() {
   const [loteAbierto, setLoteAbierto] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState('');
+  const [itemDarDeBaja, setItemDarDeBaja] = useState(null);
+  const [motivoBaja, setMotivoBaja] = useState('');
+  const [darandoDeBaja, setDarandoDeBaja] = useState(false);
+  const [errorBaja, setErrorBaja] = useState('');
 
   async function cargar() {
     setLoading(true);
@@ -179,6 +220,7 @@ export default function CatalogListPage() {
       const params = { page, limit: 15, sort };
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
+      if (anioRegistro) params.anioRegistro = anioRegistro;
       if (soloMios) params.registradoPor = user?.id;
       if (buscar.trim()) params.buscar = buscar.trim();
       const res = await catalogApi.list(params);
@@ -203,7 +245,7 @@ export default function CatalogListPage() {
     cargar();
     setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoria, estadoRevision, soloMios, buscar, sort]);
+  }, [page, categoria, estadoRevision, anioRegistro, soloMios, buscar, sort]);
 
   async function confirmarEliminar() {
     if (!itemAEliminar) return;
@@ -216,6 +258,32 @@ export default function CatalogListPage() {
       setError(getErrorMessage(err, 'No se pudo eliminar el registro'));
     } finally {
       setEliminando(false);
+    }
+  }
+
+  function abrirDarDeBaja(item) {
+    setItemDarDeBaja(item);
+    setMotivoBaja('');
+    setErrorBaja('');
+  }
+
+  async function confirmarDarDeBaja() {
+    if (!itemDarDeBaja) return;
+    if (!motivoBaja.trim()) {
+      setErrorBaja('El motivo es obligatorio');
+      return;
+    }
+    setDarandoDeBaja(true);
+    setErrorBaja('');
+    try {
+      await catalogApi.darDeBaja(itemDarDeBaja._id, motivoBaja.trim());
+      setItemDarDeBaja(null);
+      setMensaje('Registro dado de baja correctamente');
+      await cargar();
+    } catch (err) {
+      setErrorBaja(getErrorMessage(err, 'No se pudo dar de baja el registro'));
+    } finally {
+      setDarandoDeBaja(false);
     }
   }
 
@@ -273,6 +341,7 @@ export default function CatalogListPage() {
       const params = { sort };
       if (categoria) params.categoria = categoria;
       if (estadoRevision) params.estadoRevision = estadoRevision;
+      if (anioRegistro) params.anioRegistro = anioRegistro;
       if (soloMios) params.registradoPor = user?.id;
       if (buscar.trim()) params.buscar = buscar.trim();
       const res = await catalogApi.exportPdf(params);
@@ -440,6 +509,11 @@ export default function CatalogListPage() {
                 <Pencil size={16} />
               </Link>
             ) : null}
+            {puedeDarDeBaja(item, user?.rol) ? (
+              <button onClick={() => abrirDarDeBaja(item)} className="text-slate-500 hover:text-slate-700" title="Dar de baja">
+                <Archive size={16} />
+              </button>
+            ) : null}
             {user?.rol === ROLES.MANAGER ? (
               <button onClick={() => setItemAEliminar(item)} className="text-secondary hover:text-red-700" title="Eliminar">
                 <Trash2 size={16} />
@@ -462,8 +536,10 @@ export default function CatalogListPage() {
           copias={row.copias}
           puedeEditar={puedeEditar}
           esManager={user?.rol === ROLES.MANAGER}
+          rol={user?.rol}
           onEliminar={setItemAEliminar}
           onEnviar={enviarUno}
+          onDarDeBaja={abrirDarDeBaja}
         />
       </div>
     );
@@ -527,6 +603,22 @@ export default function CatalogListPage() {
           {Object.values(ESTADOS_REVISION).map((estado) => (
             <option key={estado} value={estado}>
               {ESTADO_REVISION_LABELS[estado]}
+            </option>
+          ))}
+          <option value="DE_BAJA">De baja</option>
+        </Select>
+        <Select
+          value={anioRegistro}
+          onChange={(e) => {
+            setPage(1);
+            setAnioRegistro(e.target.value);
+          }}
+          className="max-w-xs"
+        >
+          <option value="">Todos los años de registro</option>
+          {aniosRegistro.map((anio) => (
+            <option key={anio} value={anio}>
+              {anio}
             </option>
           ))}
         </Select>
@@ -609,6 +701,38 @@ export default function CatalogListPage() {
           {itemAEliminar?.idInventario ? ` (ID ${itemAEliminar.idInventario})` : ''}? Esta accion quedara registrada en
           la auditoria.
         </p>
+      </Modal>
+
+      <Modal
+        open={!!itemDarDeBaja}
+        title="Dar de baja"
+        onClose={() => setItemDarDeBaja(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setItemDarDeBaja(null)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" icon={Archive} onClick={confirmarDarDeBaja} disabled={darandoDeBaja}>
+              {darandoDeBaja ? 'Guardando...' : 'Dar de baja'}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-600">
+            Vas a dar de baja <strong>{itemDarDeBaja?.titulo}</strong>
+            {itemDarDeBaja?.idInventario ? ` (ID ${itemDarDeBaja.idInventario})` : ''}. El registro se queda visible
+            en el catalogo y en los reportes (marcado en gris) para dejar constancia de que existio - no se elimina.
+          </p>
+          <Textarea
+            label="Motivo"
+            required
+            placeholder="Ej. Se perdio, se dono, se destruyo por daño irreparable..."
+            value={motivoBaja}
+            onChange={(e) => setMotivoBaja(e.target.value)}
+          />
+          <AlertBanner>{errorBaja}</AlertBanner>
+        </div>
       </Modal>
 
       <Modal

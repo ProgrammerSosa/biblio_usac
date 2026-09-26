@@ -100,6 +100,15 @@ async function enviarLote(req, res, next) {
   }
 }
 
+// Convierte "2024" en un rango [1 ene 2024, 1 ene 2025) para filtrar por createdAt - el año en
+// que el registro se creo, no el de publicacion (ver COLUMNA_ANIO_REGISTRO en export_controller,
+// que muestra este mismo dato en el reporte). Un valor invalido o vacio simplemente no filtra.
+function rangoDeAnio(anioTexto) {
+  const anio = parseInt(anioTexto, 10);
+  if (!anioTexto || Number.isNaN(anio)) return null;
+  return { $gte: new Date(Date.UTC(anio, 0, 1)), $lt: new Date(Date.UTC(anio + 1, 0, 1)) };
+}
+
 function filtroVisibilidadBorradores(userId) {
   // Un borrador (enviado: false) solo lo puede ver quien lo creo. Todo lo ya enviado
   // es visible para cualquiera, como siempre.
@@ -108,12 +117,18 @@ function filtroVisibilidadBorradores(userId) {
 
 async function listItems(req, res, next) {
   try {
-    const { estadoRevision, categoria, registradoPor, buscar, sort, page = 1, limit = 20 } = req.query;
+    const { estadoRevision, categoria, registradoPor, anioRegistro, buscar, sort, page = 1, limit = 20 } = req.query;
 
     const filtro = { eliminado: false };
-    if (estadoRevision) filtro.estadoRevision = estadoRevision;
+    if (estadoRevision === 'DE_BAJA') {
+      filtro.deBaja = true;
+    } else if (estadoRevision) {
+      filtro.estadoRevision = estadoRevision;
+    }
     if (categoria) filtro.categoria = categoria;
     if (registradoPor) filtro.registradoPor = registradoPor;
+    const rangoAnioRegistro = rangoDeAnio(anioRegistro);
+    if (rangoAnioRegistro) filtro.createdAt = rangoAnioRegistro;
 
     const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
     if (buscar && buscar.trim()) {
@@ -477,6 +492,48 @@ async function deleteItem(req, res, next) {
   }
 }
 
+// "Dar de baja" es distinto de eliminar: el registro se queda visible (en el catalogo y en
+// los reportes, marcado en gris) en vez de ocultarse - deja constancia de que ese ejemplar
+// existio y ya no esta disponible. Solo tiene sentido para algo que de verdad estuvo en el
+// inventario (Aprobado); pedir el motivo es obligatorio, igual que rechazar pide observaciones.
+async function darDeBaja(req, res, next) {
+  try {
+    const { motivo } = req.body;
+    if (!motivo || !motivo.trim()) {
+      return fail(res, 'El motivo es obligatorio para dar de baja un registro');
+    }
+
+    const item = await Catalog.findOne({ _id: req.params.id, eliminado: false });
+    if (!item) {
+      return notFound(res, 'Registro no encontrado');
+    }
+    if (item.estadoRevision !== ESTADOS_REVISION.APROBADO) {
+      return fail(res, 'Solo se puede dar de baja un registro que ya esta Aprobado', 409);
+    }
+    if (item.deBaja) {
+      return fail(res, 'Este registro ya esta dado de baja', 409);
+    }
+
+    item.deBaja = true;
+    item.motivoBaja = motivo.trim();
+    item.fechaBaja = new Date();
+    item.dadoDeBajaPor = req.user.userId;
+    await item.save();
+
+    await registrarAuditoria({
+      accion: ACCIONES_AUDITORIA.DAR_DE_BAJA,
+      entidad: 'Catalog',
+      entidadId: item._id,
+      usuario: req.user.userId,
+      detalles: { idInventario: item.idInventario, motivo: item.motivoBaja },
+    });
+
+    return ok(res, item, 'Registro dado de baja');
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   createItem,
   listItems,
@@ -489,5 +546,6 @@ module.exports = {
   previsualizarImportacion,
   confirmarImportacion,
   deleteItem,
+  darDeBaja,
   filtroVisibilidadBorradores,
 };

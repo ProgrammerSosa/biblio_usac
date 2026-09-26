@@ -4,6 +4,18 @@ const HEADER_BORDER = '#0f172a';
 const ROW_TEXT = '#0f172a';
 const DANGER_TEXT = '#dc2626';
 const BORDER_COLOR = '#e2e8f0';
+// Un registro dado de baja se dibuja completo en gris y con el texto tachado, sin importar el
+// color que le tocaria por el patron normal (ejemplar/copia) - se nota de un vistazo que ya
+// no esta disponible, sin tener que borrarlo del reporte. Un gris mas fuerte que BORDER_COLOR
+// (que usa ese mismo tono claro para el borde de cualquier fila) para que la fila de baja se
+// distinga de un vistazo y no parezca solo una fila con borde grueso.
+const GRIS_BAJA_FONDO = '#cbd5e1';
+const GRIS_BAJA_TEXTO = '#475569';
+// Un registro rechazado se dibuja completo en rojo (sin tachar, a diferencia de dado de baja:
+// todavia se puede corregir y volver a enviar) para que salte a la vista igual que un dado de
+// baja, tambien sin importar el color que le tocaria por el patron ejemplar/copia.
+const ROJO_RECHAZO_FONDO = '#fee2e2';
+const ROJO_RECHAZO_TEXTO = '#991b1b';
 
 const PADDING_X = 4;
 const PADDING_Y = 4;
@@ -39,14 +51,28 @@ function calcularAltoHeader(doc, columns) {
 }
 
 function calcularAltoFila(doc, columns, row) {
+  // Tiene que medir con la MISMA fuente con la que drawFila va a dibujar (ver mas abajo) -
+  // Helvetica-Bold es un poco mas ancha, asi que si aqui se mide con la fuente equivocada el
+  // texto real podria necesitar una linea mas de las que se calcularon y quedar recortado.
+  const negritaForzada = !!estiloEspecialFila(row)?.tachado;
   return columns.reduce((alto, col) => {
-    const h = altoTexto(doc, valorCelda(col, row), col.width - PADDING_X * 2, 'Helvetica') + PADDING_Y * 2;
+    const fuente = col.negrita || negritaForzada ? 'Helvetica-Bold' : 'Helvetica';
+    const h = altoTexto(doc, valorCelda(col, row), col.width - PADDING_X * 2, fuente) + PADDING_Y * 2;
     return Math.max(alto, h);
   }, ALTO_MIN_FILA);
 }
 
 function anchoDe(columns) {
   return columns.reduce((sum, col) => sum + col.width, 0);
+}
+
+// Estilo especial que manda sobre el patron normal (ejemplar/copia) para toda la fila/celda ID
+// de un registro: dado de baja gana sobre rechazado si por algun motivo se dieran los dos
+// (no deberia pasar: solo se puede dar de baja un Aprobado, ver darDeBaja en el backend).
+function estiloEspecialFila(row) {
+  if (row.deBaja) return { fondo: GRIS_BAJA_FONDO, colorTexto: GRIS_BAJA_TEXTO, tachado: true };
+  if (row.estadoRevision === 'RECHAZADO') return { fondo: ROJO_RECHAZO_FONDO, colorTexto: ROJO_RECHAZO_TEXTO, tachado: false };
+  return null;
 }
 
 function drawTableHeader(doc, { x, y, columns }) {
@@ -78,19 +104,28 @@ function drawFila(doc, { x, y, columns, row, indice }) {
   const alto = calcularAltoFila(doc, columns, row);
   const width = anchoDe(columns);
   let cursorX = x;
+  const estiloEspecial = estiloEspecialFila(row);
 
+  if (estiloEspecial) {
+    doc.rect(x, y, width, alto).fill(estiloEspecial.fondo);
+  }
   doc.rect(x, y, width, alto).strokeColor(BORDER_COLOR).stroke();
 
   columns.forEach((col) => {
-    const fuente = col.negrita ? 'Helvetica-Bold' : 'Helvetica';
+    // El texto tachado (dado de baja) va en negrita para que se siga leyendo bien encima de la
+    // linea del tachado - sin esto la letra fina se pierde detras del strike.
+    const fuente = col.negrita || estiloEspecial?.tachado ? 'Helvetica-Bold' : 'Helvetica';
     const tamano = col.fontSize || FONT_SIZE;
     const anchoTexto = col.width - PADDING_X * 2;
     const texto = String(valorCelda(col, row));
+    const colorTexto = estiloEspecial ? estiloEspecial.colorTexto : col.colorFn ? col.colorFn(row, indice) || ROW_TEXT : ROW_TEXT;
 
     doc.font(fuente).fontSize(tamano);
-    doc
-      .fillColor(col.colorFn ? col.colorFn(row, indice) || ROW_TEXT : ROW_TEXT)
-      .text(texto, cursorX + PADDING_X, y + PADDING_Y, { width: anchoTexto, align: col.align || 'left' });
+    doc.fillColor(colorTexto).text(texto, cursorX + PADDING_X, y + PADDING_Y, {
+      width: anchoTexto,
+      align: col.align || 'left',
+      strike: !!estiloEspecial?.tachado,
+    });
     cursorX += col.width;
   });
 
@@ -102,7 +137,7 @@ function drawFila(doc, { x, y, columns, row, indice }) {
 // ID para que se vea como una sola casilla que abarca la fila principal y la de continuacion
 // (si la hay), y asi quede clarisimo a que registro pertenece cada una sin tener que repetir
 // nada.
-function drawCeldaAbarcada(doc, { x, y, width, alto, texto, fondo, colorTexto, fuente, tamano }) {
+function drawCeldaAbarcada(doc, { x, y, width, alto, texto, fondo, colorTexto, fuente, tamano, tachado }) {
   doc.rect(x, y, width, alto).fill(fondo);
   doc.strokeColor(HEADER_BORDER).lineWidth(0.75).rect(x, y, width, alto).stroke();
 
@@ -111,7 +146,7 @@ function drawCeldaAbarcada(doc, { x, y, width, alto, texto, fondo, colorTexto, f
   const altoTextoReal = doc.heightOfString(texto, { width: anchoTexto });
   const offsetY = Math.max(PADDING_Y, (alto - altoTextoReal) / 2);
 
-  doc.fillColor(colorTexto).text(texto, x + PADDING_X, y + offsetY, { width: anchoTexto, align: 'center' });
+  doc.fillColor(colorTexto).text(texto, x + PADDING_X, y + offsetY, { width: anchoTexto, align: 'center', strike: !!tachado });
 }
 
 // Encabezados de todos los grupos de columnas, uno debajo del otro (una sola vez,
@@ -141,19 +176,27 @@ function altoBloqueRegistro(doc, columnGroups, row) {
  * como una sola casilla que abarca la altura completa del bloque (fila
  * principal + fila de continuacion si la hay) en vez de repetirse por fila -
  * asi queda clarisimo a que registro pertenece cada fila sin duplicar nada.
+ * `tituloCategoria` (opcional) se repite arriba de la tabla de columnas en CADA pagina (la
+ * primera y cualquier continuacion) - si las hojas impresas se desordenan o se separan de las
+ * de otra categoria, cada una sigue diciendo por su cuenta de que categoria es.
  */
-function drawTable(doc, { x, columns, columnGroups, rows, idColumn }) {
+function drawTable(doc, { x, columns, columnGroups, rows, idColumn, tituloCategoria }) {
   const grupos = columnGroups || [columns];
   const bottomLimit = doc.page.height - doc.page.margins.bottom;
   const anchoId = idColumn ? idColumn.width : 0;
   const xContenido = x + anchoId;
 
   function dibujarEncabezadoCompleto(yInicio) {
-    const alto = drawEncabezados(doc, { x: xContenido, y: yInicio, columnGroups: grupos }) - yInicio;
+    let y = yInicio;
+    if (tituloCategoria) {
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(11).text(tituloCategoria, x, y);
+      y = doc.y + 6;
+    }
+    const alto = drawEncabezados(doc, { x: xContenido, y, columnGroups: grupos }) - y;
     if (idColumn) {
       drawCeldaAbarcada(doc, {
         x,
-        y: yInicio,
+        y,
         width: anchoId,
         alto,
         texto: idColumn.header,
@@ -163,7 +206,7 @@ function drawTable(doc, { x, columns, columnGroups, rows, idColumn }) {
         tamano: FONT_SIZE,
       });
     }
-    return yInicio + alto;
+    return y + alto;
   }
 
   let y = doc.y;
@@ -187,16 +230,18 @@ function drawTable(doc, { x, columns, columnGroups, rows, idColumn }) {
     });
 
     if (idColumn) {
+      const estiloEspecial = estiloEspecialFila(row);
       drawCeldaAbarcada(doc, {
         x,
         y: yInicioRegistro,
         width: anchoId,
         alto: y - yInicioRegistro,
         texto: String(valorCelda(idColumn, row)),
-        fondo: idColumn.bgColorFn ? idColumn.bgColorFn(row, indice) : '#ffffff',
-        colorTexto: idColumn.colorFn ? idColumn.colorFn(row, indice) || ROW_TEXT : ROW_TEXT,
+        fondo: estiloEspecial ? estiloEspecial.fondo : idColumn.bgColorFn ? idColumn.bgColorFn(row, indice) : '#ffffff',
+        colorTexto: estiloEspecial ? estiloEspecial.colorTexto : idColumn.colorFn ? idColumn.colorFn(row, indice) || ROW_TEXT : ROW_TEXT,
         fuente: idColumn.negrita ? 'Helvetica-Bold' : 'Helvetica',
         tamano: idColumn.fontSize || FONT_SIZE,
+        tachado: !!estiloEspecial?.tachado,
       });
     }
 
@@ -212,4 +257,4 @@ function drawTable(doc, { x, columns, columnGroups, rows, idColumn }) {
   return y;
 }
 
-module.exports = { drawTable, DANGER_TEXT };
+module.exports = { drawTable, DANGER_TEXT, GRIS_BAJA_FONDO, GRIS_BAJA_TEXTO, ROJO_RECHAZO_FONDO, ROJO_RECHAZO_TEXTO };

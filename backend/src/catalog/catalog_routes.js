@@ -14,6 +14,7 @@ const {
   previsualizarImportacion,
   confirmarImportacion,
   deleteItem,
+  darDeBaja,
 } = require('./catalog_controller');
 
 const router = express.Router();
@@ -43,6 +44,7 @@ router.post('/importar/confirmar', confirmarImportacion);
 router.get('/:id', getItem);
 router.patch('/:id', updateOwnItem);
 router.patch('/:id/revisar', checkRole(ROLES.ADMIN, ROLES.MANAGER), revisarMaterial);
+router.patch('/:id/dar-de-baja', checkRole(ROLES.ADMIN, ROLES.MANAGER), darDeBaja);
 router.delete('/:id', checkRole(ROLES.MANAGER), deleteItem);
 
 module.exports = router;
