@@ -24,9 +24,7 @@ const {
   COLOR_EJEMPLAR_B,
   COLOR_COPIA,
   TAMANO_PAGINA_OFICIO,
-  MARGEN_VERTICAL,
-  MARGEN_IZQUIERDO,
-  MARGEN_DERECHO,
+  MARGEN_PAGINA,
   CM_A_PUNTOS,
 } = require('../src/exports/export_controller');
 
@@ -58,8 +56,11 @@ afterAll(async () => {
   await closeDatabase();
 });
 
+// Usa las MISMAS constantes que exportCatalogPdf (tamaño de hoja y margenes), no numeros
+// inventados aparte - si production cambia el margen o el tamaño de hoja, esta prueba debe
+// sentirlo tambien, en vez de seguir probando contra un ancho disponible que ya no existe.
 function nuevoDoc() {
-  return new PDFDocument({ margin: 40, size: [612, 936], layout: 'landscape' });
+  return new PDFDocument({ margin: MARGEN_PAGINA, size: TAMANO_PAGINA_OFICIO, layout: 'landscape' });
 }
 
 function anchoDisponibleOficio() {
@@ -654,20 +655,19 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
     expect(res.body.toString('latin1')).toContain('/MediaBox [0 0 1008 612]');
   });
 
-  test('la tabla (sin contar el bloque de encabezado) mide 30cm de ancho, corrida 1cm a la izquierda', () => {
+  test('margen parejo de 1cm en los 4 lados - la tabla usa todo lo demas (ancho y alto)', () => {
     const anchoHojaFinal = TAMANO_PAGINA_OFICIO[1]; // landscape invierte el tamaño, ver test de arriba
-    const anchoTablaCm = (anchoHojaFinal - MARGEN_IZQUIERDO - MARGEN_DERECHO) / CM_A_PUNTOS;
-    const altoHojaFinalCm = TAMANO_PAGINA_OFICIO[0] / CM_A_PUNTOS;
-    const margenVerticalCm = MARGEN_VERTICAL / CM_A_PUNTOS;
+    const altoHojaFinal = TAMANO_PAGINA_OFICIO[0];
+    const margenCm = MARGEN_PAGINA / CM_A_PUNTOS;
+    const anchoTablaCm = (anchoHojaFinal - 2 * MARGEN_PAGINA) / CM_A_PUNTOS;
+    const altoTablaCm = (altoHojaFinal - 2 * MARGEN_PAGINA) / CM_A_PUNTOS;
 
-    expect(anchoTablaCm).toBeCloseTo(30, 1);
-    expect(margenVerticalCm).toBeCloseTo(1, 1);
-    // El margen derecho es mayor que el izquierdo por exactamente 2cm (todo el bloque se corrio
-    // 1cm a la izquierda: la izquierda perdio 1cm y la derecha lo gano), y ambos son mucho mas
-    // grandes que el margen vertical.
-    expect((MARGEN_DERECHO - MARGEN_IZQUIERDO) / CM_A_PUNTOS).toBeCloseTo(2, 1);
-    expect(MARGEN_IZQUIERDO).toBeGreaterThan(MARGEN_VERTICAL);
-    expect(altoHojaFinalCm).toBeCloseTo(21.6, 1);
+    expect(margenCm).toBeCloseTo(1, 1);
+    // Ancho y alto disponibles para la tabla son la hoja completa menos el mismo margen en los
+    // 4 lados - nada de anchos "objetivo" en cm calculados aparte que despues no coinciden con
+    // lo que sale impreso de verdad.
+    expect(anchoTablaCm).toBeCloseTo(33.56, 1);
+    expect(altoTablaCm).toBeCloseTo(19.59, 1);
   });
 
   test('el nombre de la categoria se repite en el encabezado de CADA pagina, no solo la primera', async () => {

@@ -30,29 +30,28 @@ const ESTADO_LETRAS = {
 const TAMANO_PAGINA_OFICIO = [612, 1008];
 const CM_A_PUNTOS = 28.3465;
 
-// Margen vertical (arriba/abajo): 1cm - deja el bloque de encabezado (titulo, filtros,
-// leyenda) en unos 4.5cm y la tabla en unos 15cm de alto, que es justo lo que pidio el
-// usuario al medir el PDF ya impreso.
-const MARGEN_VERTICAL = 1 * CM_A_PUNTOS;
-
-// Margen horizontal: el que le queda al ancho de la hoja (1008pt, 35.6cm en landscape) para
-// que la tabla mida exactamente 30cm de ancho - no es el mismo valor que el margen vertical a
-// proposito, es mas grande, para no repetir el error anterior de calcular a partir de datos sin
-// confirmar contra lo que salio impreso de verdad. Izquierda y derecha ya NO son iguales: todo
-// el bloque se corrio 1cm a la izquierda (izquierda 1cm menos, derecha 1cm mas) sin cambiar el
-// ancho total de la tabla, tambien a pedido del usuario tras probarlo impreso.
-const ANCHO_HOJA_PT = TAMANO_PAGINA_OFICIO[1];
-const ANCHO_TABLA_DESEADO_PT = 30 * CM_A_PUNTOS;
-const MARGEN_HORIZONTAL_BASE = (ANCHO_HOJA_PT - ANCHO_TABLA_DESEADO_PT) / 2;
-const CORRIMIENTO_IZQUIERDA = 1 * CM_A_PUNTOS;
-const MARGEN_IZQUIERDO = MARGEN_HORIZONTAL_BASE - CORRIMIENTO_IZQUIERDA;
-const MARGEN_DERECHO = MARGEN_HORIZONTAL_BASE + CORRIMIENTO_IZQUIERDA;
+// Margen parejo de 1cm en los 4 lados (arriba, abajo, izquierda, derecha). Los intentos
+// anteriores de calcular un ancho de tabla "exacto" en cm (30cm, luego 33cm) y de correr el
+// bloque hacia la izquierda nunca terminaban de coincidir con lo que salia impreso de verdad
+// (la impresora/el driver de la impresora no necesariamente respeta el tamaño de hoja del PDF
+// al pie de la letra) - un margen parejo y chico en los 4 lados es mas simple y mas facil de
+// verificar con una regla. anchoDisponible y bottomLimit se calculan siempre a partir de
+// doc.page.margins, asi que la tabla (ancho Y alto) crece sola para aprovechar TODO lo que
+// quede - mas alto disponible tambien significa que entran mas registros antes de necesitar
+// una pagina nueva.
+const MARGEN_PAGINA = 1 * CM_A_PUNTOS;
 
 // Ancho minimo/maximo de cada columna de atributo: por debajo del minimo el texto
 // deja de ser legible aunque haga salto de linea; el maximo evita que una columna con
 // texto realmente largo (ej. "Notas") deje sin espacio a las demas.
 const ANCHO_MIN_ATRIBUTO = 70;
 const ANCHO_MAX_ATRIBUTO = 220;
+
+// Se probo medir Titulo/Autor igual que un atributo (percentil 75 del ancho real) para que un
+// titulo excepcionalmente largo no quedara aplastado en 5-6 lineas - pero ensancharlos le quita
+// presupuesto a los atributos propios de la categoria (Editorial, Tematica, etc.) y esos
+// volvian a caerse a una fila de continuacion, que es peor: pasa en CASI todos los registros,
+// no solo en el raro con titulo larguisimo. Por eso Titulo/Autor se quedan con ancho fijo.
 
 // Deben coincidir con la fuente/tamano/padding que usa pdfTable.js para dibujar las celdas
 // de atributo - esto solo ESTIMA el ancho antes de dibujar nada, con la misma fuente real,
@@ -183,10 +182,9 @@ const COLUMNA_ESTADO_FISICO = (doc, registros) => ({
 });
 
 // Columnas comunes (Idioma, Anio, Edicion, Lugar, Paginas) que esta categoria no
-// desactivo. Estado (revision) y Estado fisico se devuelven aparte: Estado nunca ocupa mas
-// de una linea ("Aprobado"/"Pendiente"/"Rechazado") asi que siempre va en la fila principal,
-// pero Estado fisico se trata como un atributo mas (puede pasar a la fila de continuacion) -
-// ver construirGruposColumnas.
+// desactivo. Estado (revision) y Estado fisico se devuelven aparte: los 2 van garantizados en
+// la fila principal (ver construirGruposColumnas) - ninguno de los 2 compite por espacio con
+// los atributos propios de la categoria.
 function columnasComunesActivas(doc, categoriaDoc, registros) {
   const desactivados = categoriaDoc.camposComunesDesactivados || [];
   const opcionales = CAMPOS_COMUNES_OPCIONALES.filter((c) => !desactivados.includes(c.clave)).map(({ clave, ...columna }) => columna);
@@ -350,10 +348,12 @@ function repartirSobrante(lote, sobranteInicial) {
 //
 // "Notas" va garantizado en la fila principal (ver esCampoNotas), pero al final de todo -
 // despues incluso de los atributos que si cupieron - para que sea lo ultimo que se lee de
-// cada registro. "Estado fisico" compite por espacio como un atributo mas: "Notas" puede ser
-// texto largo que conviene compartir alto con el titulo/autor, y "Estado fisico" casi siempre
-// es corto ("Buen estado", "Regular"), asi que sufre menos si le toca la fila de continuacion
-// cuando el espacio no alcanza para todo.
+// cada registro. "Estado fisico" tambien va garantizado (ver columnasComunesActivas): antes
+// competia por espacio como un atributo mas y en la practica eso hacia que CASI todo registro
+// necesitara una fila de continuacion solo para el (es un dato casi universal, casi siempre
+// corto), asi que se saco del reparto para que la fila principal alcance sola con mas
+// frecuencia - solo los atributos propios de la categoria (los que de verdad varian mucho de
+// una a otra) compiten por lo que quede del espacio.
 function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
   const { opcionales: comunesActivos, estadoRevision, estadoFisico } = columnasComunesActivas(doc, categoriaDoc, filas);
   const columnasFijas = COLUMNAS_FIJAS();
@@ -366,8 +366,14 @@ function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
     : null;
   const columnasNotasFinal = columnaNotas ? [columnaNotas] : [];
 
-  const columnasGarantizadas = [...columnasFijas, ...comunesActivos, estadoRevision, COLUMNA_ANIO_REGISTRO()];
-  const columnasOverflow = [...construirColumnasAtributos(doc, otrosCampos, filas), ...(estadoFisico ? [estadoFisico] : [])];
+  const columnasGarantizadas = [
+    ...columnasFijas,
+    ...comunesActivos,
+    ...(estadoFisico ? [estadoFisico] : []),
+    estadoRevision,
+    COLUMNA_ANIO_REGISTRO(),
+  ];
+  const columnasOverflow = construirColumnasAtributos(doc, otrosCampos, filas);
 
   if (columnasOverflow.length === 0) {
     // Sin atributos que reparar en una fila de continuacion, "Notas" (si la categoria la
@@ -491,7 +497,7 @@ async function exportCatalogPdf(req, res, next) {
     res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoPdf()}"`);
 
     const doc = new PDFDocument({
-      margins: { top: MARGEN_VERTICAL, bottom: MARGEN_VERTICAL, left: MARGEN_IZQUIERDO, right: MARGEN_DERECHO },
+      margin: MARGEN_PAGINA,
       size: TAMANO_PAGINA_OFICIO,
       layout: 'landscape',
     });
@@ -555,8 +561,6 @@ module.exports = {
   COLOR_EJEMPLAR_B,
   COLOR_COPIA,
   TAMANO_PAGINA_OFICIO,
-  MARGEN_VERTICAL,
-  MARGEN_IZQUIERDO,
-  MARGEN_DERECHO,
+  MARGEN_PAGINA,
   CM_A_PUNTOS,
 };
