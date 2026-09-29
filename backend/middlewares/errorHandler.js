@@ -21,7 +21,7 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
   }
 
   if (err.name === 'MulterError') {
-    const mensaje = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo no puede pesar mas de 10 MB' : err.message;
+    const mensaje = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo es demasiado grande' : err.message;
     return res.status(400).json({ success: false, error: mensaje });
   }
 
