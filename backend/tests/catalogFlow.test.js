@@ -66,8 +66,6 @@ function libroValido(noInventario) {
     estadoFisico: 'Buen estado',
     atributos: {
       EDITORIAL: 'Editorial USAC',
-      ISBN: '978-0-00-000000-0',
-      TIPO_DE_DOCUMENTO: 'Fisico',
     },
   };
 }
@@ -86,7 +84,6 @@ function revistaValida(noInventario) {
     estadoFisico: 'Buen estado',
     atributos: {
       EDITORIAL: 'Editorial USAC',
-      ISSN: '1234-5678',
       VOLUMEN: '1',
     },
   };

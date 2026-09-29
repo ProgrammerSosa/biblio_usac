@@ -78,7 +78,7 @@ describe('GET /api/backup/exportar', () => {
       idInventario: 10001,
       autor: 'Autor De Respaldo',
       titulo: 'Libro De Respaldo',
-      atributos: { EDITORIAL: 'Editorial X', ISBN: '978-1', TIPO_DE_DOCUMENTO: 'Fisico' },
+      atributos: { EDITORIAL: 'Editorial X' },
       estadoRevision: ESTADOS_REVISION.APROBADO,
       enviado: true,
       registradoPor: manager._id,
@@ -104,8 +104,6 @@ describe('GET /api/backup/exportar', () => {
 
     const encabezados = hojaLibro.getRow(1).values;
     expect(encabezados).toContain('Editorial');
-    expect(encabezados).toContain('ISBN');
-    expect(encabezados).toContain('Tipo de documento');
 
     const filaLibro = hojaLibro.getRow(2);
     const valores = filaLibro.values;
@@ -151,7 +149,7 @@ describe('POST /api/backup/restaurar', () => {
       lugar: 'Guatemala',
       paginasImpresas: 150,
       estadoFisico: 'Buen estado',
-      atributos: { EDITORIAL: 'Editorial Z', ISBN: '978-9', TIPO_DE_DOCUMENTO: 'Fisico' },
+      atributos: { EDITORIAL: 'Editorial Z' },
       estadoRevision: ESTADOS_REVISION.APROBADO,
       observaciones: '',
       enviado: true,

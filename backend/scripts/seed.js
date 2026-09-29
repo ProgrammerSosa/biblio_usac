@@ -22,7 +22,8 @@ const CATEGORIAS_POR_DEFECTO = [
   {
     clave: 'LIBRO',
     nombre: 'Libro',
-    campos: [campo('Editorial'), campo('ISBN'), campo('Tipo de documento')],
+    orden: 1,
+    campos: [campo('Editorial', false), campo('Notas', false)],
   },
   {
     clave: 'ENCICLOPEDIA',
@@ -32,22 +33,73 @@ const CATEGORIAS_POR_DEFECTO = [
   {
     clave: 'REVISTA',
     nombre: 'Revista',
-    campos: [campo('Editorial'), campo('ISSN'), campo('Volumen')],
+    orden: 2,
+    campos: [campo('Editorial'), campo('Volumen')],
   },
   {
     clave: 'DICCIONARIO',
     nombre: 'Diccionario',
-    campos: [campo('Editorial')],
+    campos: [campo('Editorial', false), campo('Notas', false)],
   },
   {
     clave: 'FOLLETO',
     nombre: 'Folleto',
-    campos: [campo('Editorial'), campo('Tipo de documento')],
+    orden: 3,
+    campos: [campo('Editorial', false), campo('Notas', false), campo('Tematica', false)],
   },
   {
     clave: 'PUBLICACIONES_INSTITUCIONALES',
     nombre: 'Publicaciones Institucionales',
-    campos: [campo('Editorial'), campo('Tipo de documento')],
+    orden: 4,
+    campos: [campo('Editorial', false), campo('Notas')],
+  },
+  {
+    clave: 'TESIS',
+    nombre: 'Tesis',
+    camposComunesDesactivados: ['edicion', 'lugar', 'estadoFisico'],
+    campos: [campo('Pais', false), campo('Institucion', false), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_CON_NUMERO_DE_INVENTARIO',
+    nombre: 'Docs con Numero de Inventario',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de documento', false), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_DE_DONACION',
+    nombre: 'Docs de Donacion',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de documento', false), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_SELLO_DE_BIBLIOCENTRAL',
+    nombre: 'Docs Sello de Biblioteca Central',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de documento', true), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_CON_SELLO_FACUECONOMICAS',
+    nombre: 'Docs con Sello Facultad de Ciencias Económicas',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de documento', false), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_SELLO_FACUJURI_Y_SOCI',
+    nombre: 'Docs Sello Facultad de Ciencias Jurídicas y Sociales',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de Documento', false), campo('Notas', false)],
+  },
+  {
+    clave: 'DOCS_FACULTAD_HUMANIDADES',
+    nombre: 'Docs Facultad de Humanidades',
+    ordenarPorTipoDocumento: true,
+    camposComunesDesactivados: ['edicion'],
+    campos: [campo('Editorial', false), campo('Tipo de documento', false), campo('Notas', false)],
   },
 ];
 

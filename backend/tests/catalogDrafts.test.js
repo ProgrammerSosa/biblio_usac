@@ -50,7 +50,7 @@ function libro(noInventario) {
     noInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo Borrador de Prueba',
-    atributos: { EDITORIAL: 'Ed', ISBN: '123', TIPO_DE_DOCUMENTO: 'Fisico' },
+    atributos: { EDITORIAL: 'Ed' },
   };
 }
 

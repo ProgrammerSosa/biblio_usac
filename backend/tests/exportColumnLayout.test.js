@@ -741,7 +741,7 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
       categoria: 'REVISTA',
       autor: 'Autor',
       titulo: 'Titulo revista',
-      atributos: { EDITORIAL: 'Ed', ISSN: '1234-5678', VOLUMEN: '1' },
+      atributos: { EDITORIAL: 'Ed', VOLUMEN: '1' },
       registradoPor: manager._id,
       enviado: true,
       estadoRevision: ESTADOS_REVISION.APROBADO,
@@ -771,10 +771,11 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
     // usa para pedir las categorias, directo contra la base de datos real.
     await Category.updateOne({ clave: 'DICCIONARIO' }, { orden: 5 });
     await Category.updateOne({ clave: 'REVISTA' }, { orden: 1 });
+    await Category.updateOne({ clave: 'FOLLETO' }, { orden: 0 });
 
     const categorias = await categoriasOrdenadasParaReporte(['DICCIONARIO', 'REVISTA', 'FOLLETO']);
 
-    // Revista (orden 1) primero, Folleto (orden 0 por defecto) despues, Diccionario (orden 5)
+    // Revista (orden 1) primero, Folleto (orden 0) despues, Diccionario (orden 5)
     // al final - no alfabetico (que hubiera sido Diccionario, Folleto, Revista).
     expect(categorias.map((c) => c.clave)).toEqual(['FOLLETO', 'REVISTA', 'DICCIONARIO']);
   });

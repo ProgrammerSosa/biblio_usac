@@ -74,7 +74,7 @@ describe('CRUD de categorias', () => {
     const res = await api(app)
       .post('/api/categories')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ nombre: 'Tesis', campos: [{ etiqueta: 'No. de Inventario', requerido: false }] });
+      .send({ nombre: 'Actas', campos: [{ etiqueta: 'No. de Inventario', requerido: false }] });
 
     expect(res.status).toBe(400);
   });
@@ -144,20 +144,26 @@ describe('CRUD de categorias', () => {
     await Category.updateOne({ clave: 'REVISTA' }, { orden: 1 });
     await Category.updateOne({ clave: 'LIBRO' }, { orden: 2 });
     await Category.updateOne({ clave: 'FOLLETO' }, { orden: 2 });
-    // Diccionario, Enciclopedia y Publicaciones se quedan en el orden por defecto (0), asi que
-    // van primero, ordenadas entre ellas por nombre (alfabetico): Diccionario, Enciclopedia,
-    // Publicaciones Institucionales.
+    // El resto se queda en el orden por defecto (0), asi que van primero, ordenadas entre ellas
+    // por nombre (alfabetico).
 
     const res = await api(app).get('/api/categories').set('Authorization', `Bearer ${userToken}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.map((c) => c.clave)).toEqual([
       'DICCIONARIO',
+      'DOCS_FACULTAD_HUMANIDADES',
+      'DOCS_SELLO_FACUJURI_Y_SOCI',
+      'DOCS_SELLO_DE_BIBLIOCENTRAL',
+      'DOCS_CON_NUMERO_DE_INVENTARIO',
+      'DOCS_CON_SELLO_FACUECONOMICAS',
+      'DOCS_DE_DONACION',
       'ENCICLOPEDIA',
-      'PUBLICACIONES_INSTITUCIONALES',
+      'TESIS',
       'REVISTA',
       'FOLLETO',
       'LIBRO',
+      'PUBLICACIONES_INSTITUCIONALES',
     ]);
   });
 
@@ -165,7 +171,7 @@ describe('CRUD de categorias', () => {
     const creada = await api(app)
       .post('/api/categories')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ nombre: 'Tesis', campos: [] });
+      .send({ nombre: 'Actas', campos: [] });
     expect(creada.body.data.orden).toBe(0);
 
     const editada = await api(app)
@@ -183,7 +189,7 @@ describe('El catalogo usa las categorias dinamicas', () => {
     const nueva = await api(app)
       .post('/api/categories')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ nombre: 'Tesis', campos: [{ etiqueta: 'Asesor', requerido: true }] });
+      .send({ nombre: 'Actas', campos: [{ etiqueta: 'Asesor', requerido: true }] });
 
     const res = await api(app)
       .post('/api/catalog')
@@ -204,12 +210,12 @@ describe('El catalogo usa las categorias dinamicas', () => {
     await api(app)
       .post('/api/categories')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ nombre: 'Tesis', campos: [{ etiqueta: 'Asesor', requerido: true }] });
+      .send({ nombre: 'Actas', campos: [{ etiqueta: 'Asesor', requerido: true }] });
 
     const res = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ categoria: 'TESIS', noInventario: 'T-002', autor: 'Autor', titulo: 'Titulo' });
+      .send({ categoria: 'ACTAS', noInventario: 'T-002', autor: 'Autor', titulo: 'Titulo' });
 
     expect(res.status).toBe(400);
   });

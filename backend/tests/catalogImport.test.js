@@ -26,6 +26,24 @@ beforeAll(async () => {
 beforeEach(async () => {
   await seedCategoriasDePrueba();
 
+  // Estas pruebas de importacion usan "ISBN" y "Tipo de documento" como ejemplo de campos
+  // propios de LIBRO (uno obligatorio, para probar el relleno con N/A y "campos faltantes").
+  // La categoria LIBRO real ya no los tiene (se simplifico desde Gestion de Categorias), asi
+  // que se restauran aqui solo para este archivo, sin tocar el seed compartido con el resto
+  // de la app.
+  await Category.updateOne(
+    { clave: 'LIBRO' },
+    {
+      $set: {
+        campos: [
+          { clave: 'EDITORIAL', etiqueta: 'Editorial', requerido: false },
+          { clave: 'ISBN', etiqueta: 'ISBN', requerido: true },
+          { clave: 'TIPO_DE_DOCUMENTO', etiqueta: 'Tipo de documento', requerido: false },
+        ],
+      },
+    }
+  );
+
   const passwordHash = await hashPassword('claveSegura123');
   [manager, admin, auxiliar] = await Promise.all([
     User.create({ nombre: 'Jefatura', email: 'manager@usac.gt', passwordHash, rol: ROLES.MANAGER }),
@@ -431,7 +449,7 @@ describe('POST /api/catalog/importar/confirmar', () => {
       .send({
         items: [
           itemValido(), // LIBRO: si permitido
-          itemValido({ categoria: 'REVISTA', titulo: 'Revista No Permitida', atributos: { EDITORIAL: 'E', ISSN: '1', VOLUMEN: '1' } }),
+          itemValido({ categoria: 'REVISTA', titulo: 'Revista No Permitida', atributos: { EDITORIAL: 'E', VOLUMEN: '1' } }),
         ],
       });
 
