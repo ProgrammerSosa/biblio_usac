@@ -26,9 +26,12 @@ const ESTADO_LETRAS = {
   RECHAZADO: 'D',
 };
 
-// Tamaño oficio (8.5" x 14") en puntos.
-const TAMANO_PAGINA_OFICIO = [612, 1008];
+// Tamaño de hoja real medido por el usuario: 33 x 21.5cm (no 8.5x14in/35.6x21.6cm que se
+// habia usado antes - esa medida no coincidia con el papel oficio real que se esta imprimiendo,
+// causaba los problemas de margenes/recorte al imprimir). Va en formato "portrait" [corto,
+// largo] porque layout:'landscape' abajo invierte width/height.
 const CM_A_PUNTOS = 28.3465;
+const TAMANO_PAGINA_OFICIO = [21.5 * CM_A_PUNTOS, 33 * CM_A_PUNTOS];
 
 // Margen parejo de 1cm en los 4 lados (arriba, abajo, izquierda, derecha). Los intentos
 // anteriores de calcular un ancho de tabla "exacto" en cm (30cm, luego 33cm) y de correr el
@@ -46,12 +49,6 @@ const MARGEN_PAGINA = 1 * CM_A_PUNTOS;
 // texto realmente largo (ej. "Notas") deje sin espacio a las demas.
 const ANCHO_MIN_ATRIBUTO = 70;
 const ANCHO_MAX_ATRIBUTO = 220;
-
-// Se probo medir Titulo/Autor igual que un atributo (percentil 75 del ancho real) para que un
-// titulo excepcionalmente largo no quedara aplastado en 5-6 lineas - pero ensancharlos le quita
-// presupuesto a los atributos propios de la categoria (Editorial, Tematica, etc.) y esos
-// volvian a caerse a una fila de continuacion, que es peor: pasa en CASI todos los registros,
-// no solo en el raro con titulo larguisimo. Por eso Titulo/Autor se quedan con ancho fijo.
 
 // Deben coincidir con la fuente/tamano/padding que usa pdfTable.js para dibujar las celdas
 // de atributo - esto solo ESTIMA el ancho antes de dibujar nada, con la misma fuente real,
@@ -106,7 +103,17 @@ const COLUMNA_ID = (coloresPorRegistro) => ({
   colorFn: (row) => (coloresPorRegistro.get(String(row._id)) || COLOR_EJEMPLAR_A).texto,
 });
 
-const COLUMNAS_FIJAS = () => [{ key: 'titulo', header: 'Título', width: 140 }, { key: 'autor', header: 'Autor', width: 95 }];
+// Con la hoja real (33 x 21.5cm) la tabla queda en 31cm - un poco mas angosta que antes. 125 y
+// 85 son el TOPE maximo de Titulo/Autor (antes eran fijos) - igual que con los campos comunes
+// (ver camposComunesOpcionales), si el dato real es mas corto se achican solas y le devuelven
+// ese espacio a los atributos propios de la categoria, que son los que mas lo necesitan para
+// no caerse a una fila de continuacion.
+const ANCHO_MAX_TITULO = 125;
+const ANCHO_MAX_AUTOR = 85;
+const COLUMNAS_FIJAS = (doc, registros) => [
+  { key: 'titulo', header: 'Título', width: anchoIdealParaValores(doc, 'Título', registros.map((r) => r.titulo), ANCHO_MAX_TITULO) },
+  { key: 'autor', header: 'Autor', width: anchoIdealParaValores(doc, 'Autor', registros.map((r) => r.autor), ANCHO_MAX_AUTOR) },
+];
 
 // Año en que el registro se creo en el sistema (no confundir con "Año", que es el año de
 // publicacion del material y es un dato que se escribe a mano). Sale de createdAt, que
@@ -155,13 +162,33 @@ function abreviarIdioma(idioma) {
 // (camposComunesDesactivados), asi que el reporte debe respetar esa misma regla.
 // Idioma, Estado y Paginas salen abreviados (sigla de 3 letras, letra unica, "Pag.") a
 // proposito - la meta es que un registro use una sola fila lo mas seguido posible.
-const CAMPOS_COMUNES_OPCIONALES = [
-  { clave: 'idioma', key: 'idioma', header: 'Idioma', width: 32, render: (row) => abreviarIdioma(row.idioma) },
-  { clave: 'anio', key: 'anio', header: 'Año', width: 40 },
-  { clave: 'edicion', key: 'edicion', header: 'Edición', width: 65 },
-  { clave: 'lugar', key: 'lugar', header: 'Lugar', width: 75 },
-  { clave: 'paginasImpresas', key: 'paginasImpresas', header: 'Pag.', width: 35 },
+// El ancho de cada una ya NO es un numero fijo: se mide contra el dato real (igual que un
+// atributo, ver anchoIdealParaValores) con el numero de antes como TOPE maximo, nunca minimo -
+// asi nunca ocupan mas de lo que ocupaban antes (cero riesgo de regresion), pero cuando el dato
+// real es corto (ej. "ESP", "2026", "3ra") le devuelven ese espacio de sobra a los atributos
+// propios de la categoria, que son los que de verdad varian de una categoria a otra y los que
+// mas necesitan el espacio para no caerse a una fila de continuacion (ver COLUMNAS_FIJAS, mismo
+// tope-como-maximo para Titulo/Autor).
+const CAMPOS_COMUNES_OPCIONALES_DEF = [
+  { clave: 'idioma', key: 'idioma', header: 'Idioma', anchoMinimo: 20, anchoMaximo: 32, render: (row) => abreviarIdioma(row.idioma) },
+  { clave: 'anio', key: 'anio', header: 'Año', anchoMinimo: 24, anchoMaximo: 40 },
+  { clave: 'edicion', key: 'edicion', header: 'Edición', anchoMinimo: 30, anchoMaximo: 65 },
+  { clave: 'lugar', key: 'lugar', header: 'Lugar', anchoMinimo: 40, anchoMaximo: 75 },
+  { clave: 'paginasImpresas', key: 'paginasImpresas', header: 'Pag.', anchoMinimo: 24, anchoMaximo: 35 },
 ];
+
+function camposComunesOpcionales(doc, registros, defs) {
+  return defs.map((campo) => {
+    const valores = registros.map((r) => (campo.render ? campo.render(r) : r[campo.key]));
+    return {
+      clave: campo.clave,
+      key: campo.key,
+      header: campo.header,
+      render: campo.render,
+      width: anchoIdealParaValores(doc, campo.header, valores, campo.anchoMaximo, campo.anchoMinimo),
+    };
+  });
+}
 
 // Estado fisico casi siempre es un dato corto ("Buen estado", "Regular", "Hojas manchadas"),
 // asi que no deberia poder crecer tanto como Notas u otro atributo con texto de verdad largo -
@@ -187,7 +214,8 @@ const COLUMNA_ESTADO_FISICO = (doc, registros) => ({
 // los atributos propios de la categoria.
 function columnasComunesActivas(doc, categoriaDoc, registros) {
   const desactivados = categoriaDoc.camposComunesDesactivados || [];
-  const opcionales = CAMPOS_COMUNES_OPCIONALES.filter((c) => !desactivados.includes(c.clave)).map(({ clave, ...columna }) => columna);
+  const defsActivos = CAMPOS_COMUNES_OPCIONALES_DEF.filter((c) => !desactivados.includes(c.clave));
+  const opcionales = camposComunesOpcionales(doc, registros, defsActivos);
   const estadoFisico = desactivados.includes('estadoFisico') ? null : COLUMNA_ESTADO_FISICO(doc, registros);
   return { opcionales, estadoRevision: COLUMNA_ESTADO_REVISION(), estadoFisico };
 }
@@ -286,7 +314,12 @@ function nombreArchivoPdf() {
 // tienen datos normales - ese caso raro simplemente hace salto de linea (el alto de fila ya
 // se ajusta solo a eso, ver pdfTable.js), en vez de desperdiciar espacio en el resto de la
 // tabla ni dejar afuera a otra columna que si cabria.
-function anchoIdealParaValores(doc, etiqueta, valores, anchoMaximo = ANCHO_MAX_ATRIBUTO) {
+// anchoMinimo es distinto de ANCHO_MIN_ATRIBUTO (70pt, pensado para un atributo de categoria
+// con texto arbitrario) - las columnas comunes cortas (Idioma, Año, Pag.) tienen un dato
+// estructuralmente corto (una sigla, un numero) y su propio tope maximo ya es menor a 70, asi
+// que necesitan su propio minimo mas chico para poder achicarse de verdad en vez de quedarse
+// siempre en su tope (ver camposComunesOpcionales).
+function anchoIdealParaValores(doc, etiqueta, valores, anchoMaximo = ANCHO_MAX_ATRIBUTO, anchoMinimo = ANCHO_MIN_ATRIBUTO) {
   doc.font(FUENTE_ATRIBUTO).fontSize(TAMANO_ATRIBUTO);
   const anchoEtiqueta = doc.widthOfString(etiqueta || '');
 
@@ -298,7 +331,7 @@ function anchoIdealParaValores(doc, etiqueta, valores, anchoMaximo = ANCHO_MAX_A
   const anchoTipico = indicePercentil75 >= 0 ? anchos[indicePercentil75] : 0;
 
   const anchoObjetivo = Math.max(anchoEtiqueta, anchoTipico);
-  return Math.min(anchoMaximo, Math.max(ANCHO_MIN_ATRIBUTO, Math.ceil(anchoObjetivo) + PADDING_ATRIBUTO * 2));
+  return Math.min(anchoMaximo, Math.max(anchoMinimo, Math.ceil(anchoObjetivo) + PADDING_ATRIBUTO * 2));
 }
 
 function construirColumnasAtributos(doc, campos, registros) {
@@ -356,7 +389,7 @@ function repartirSobrante(lote, sobranteInicial) {
 // una a otra) compiten por lo que quede del espacio.
 function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
   const { opcionales: comunesActivos, estadoRevision, estadoFisico } = columnasComunesActivas(doc, categoriaDoc, filas);
-  const columnasFijas = COLUMNAS_FIJAS();
+  const columnasFijas = COLUMNAS_FIJAS(doc, filas);
   const camposCategoria = categoriaDoc.campos || [];
 
   const campoNotas = camposCategoria.find(esCampoNotas);

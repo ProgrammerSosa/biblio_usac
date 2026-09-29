@@ -626,7 +626,7 @@ describe('Columna "Año reg." (año en que se registro el material, no el de pub
 });
 
 describe('Tamaño de hoja oficio y margenes del PDF', () => {
-  test('la hoja mide 8.5" x 14" (612 x 1008pt)', async () => {
+  test('la hoja mide 33 x 21.5cm (el tamaño real que se esta imprimiendo)', async () => {
     const categoriaDoc = await Category.findOne({ clave: 'DICCIONARIO' });
     await Catalog.create({
       categoria: categoriaDoc.clave,
@@ -649,10 +649,10 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
       });
 
     expect(res.status).toBe(200);
-    // pdfkit dibuja en landscape invirtiendo el tamaño de pagina que se le paso ([612, 1008],
-    // que es 8.5" x 14" en formato "portrait"), asi que en el PDF final el MediaBox queda
-    // con el ancho y el alto ya intercambiados.
-    expect(res.body.toString('latin1')).toContain('/MediaBox [0 0 1008 612]');
+    // pdfkit dibuja en landscape invirtiendo el tamaño de pagina que se le paso (formato
+    // "portrait" [21.5cm, 33cm]), asi que en el PDF final el MediaBox queda con el ancho y el
+    // alto ya intercambiados: 33cm de ancho x 21.5cm de alto.
+    expect(res.body.toString('latin1')).toContain('/MediaBox [0 0 935.4345 609.44975]');
   });
 
   test('margen parejo de 1cm en los 4 lados - la tabla usa todo lo demas (ancho y alto)', () => {
@@ -663,11 +663,11 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
     const altoTablaCm = (altoHojaFinal - 2 * MARGEN_PAGINA) / CM_A_PUNTOS;
 
     expect(margenCm).toBeCloseTo(1, 1);
-    // Ancho y alto disponibles para la tabla son la hoja completa menos el mismo margen en los
-    // 4 lados - nada de anchos "objetivo" en cm calculados aparte que despues no coinciden con
-    // lo que sale impreso de verdad.
-    expect(anchoTablaCm).toBeCloseTo(33.56, 1);
-    expect(altoTablaCm).toBeCloseTo(19.59, 1);
+    // Ancho y alto disponibles para la tabla son la hoja completa (33 x 21.5cm, medida real)
+    // menos el mismo margen en los 4 lados - nada de anchos "objetivo" en cm calculados aparte
+    // que despues no coinciden con lo que sale impreso de verdad. 33-2=31cm, 21.5-2=19.5cm.
+    expect(anchoTablaCm).toBeCloseTo(31, 1);
+    expect(altoTablaCm).toBeCloseTo(19.5, 1);
   });
 
   test('el nombre de la categoria se repite en el encabezado de CADA pagina, no solo la primera', async () => {
