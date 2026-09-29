@@ -50,6 +50,9 @@ export default function CategoriesPage() {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [editando, setEditando] = useState(null);
   const [nombre, setNombre] = useState('');
+  const [ordenActivo, setOrdenActivo] = useState(false);
+  const [orden, setOrden] = useState(1);
+  const [ordenarPorTipoDocumento, setOrdenarPorTipoDocumento] = useState(false);
   const [campos, setCampos] = useState([CAMPO_VACIO()]);
   const [comunesDesactivados, setComunesDesactivados] = useState([]);
   const [guardando, setGuardando] = useState(false);
@@ -79,6 +82,9 @@ export default function CategoriesPage() {
   function abrirNueva() {
     setEditando(null);
     setNombre('');
+    setOrdenActivo(false);
+    setOrden(1);
+    setOrdenarPorTipoDocumento(false);
     setCampos([CAMPO_VACIO()]);
     setComunesDesactivados([]);
     setErrorModal('');
@@ -88,6 +94,9 @@ export default function CategoriesPage() {
   function abrirEditar(categoria) {
     setEditando(categoria);
     setNombre(categoria.nombre);
+    setOrdenActivo((categoria.orden ?? 0) > 0);
+    setOrden(categoria.orden > 0 ? categoria.orden : 1);
+    setOrdenarPorTipoDocumento(!!categoria.ordenarPorTipoDocumento);
     setCampos(categoria.campos.length > 0 ? categoria.campos.map((c) => ({ ...c })) : [CAMPO_VACIO()]);
     setComunesDesactivados(categoria.camposComunesDesactivados || []);
     setErrorModal('');
@@ -129,10 +138,17 @@ export default function CategoriesPage() {
 
     setGuardando(true);
     try {
+      const datos = {
+        nombre,
+        campos: camposValidos,
+        camposComunesDesactivados: comunesDesactivados,
+        orden: ordenActivo ? Number(orden) || 1 : 0,
+        ordenarPorTipoDocumento,
+      };
       if (editando) {
-        await categoriesApi.update(editando._id, { nombre, campos: camposValidos, camposComunesDesactivados: comunesDesactivados });
+        await categoriesApi.update(editando._id, datos);
       } else {
-        await categoriesApi.create({ nombre, campos: camposValidos, camposComunesDesactivados: comunesDesactivados });
+        await categoriesApi.create(datos);
       }
       setModalAbierto(false);
       await cargar();
@@ -246,6 +262,37 @@ export default function CategoriesPage() {
               Clave interna: <code>{editando.clave}</code> (no cambia aunque edites el nombre)
             </p>
           ) : null}
+
+          <div>
+           
+            {ordenActivo ? (
+              <div className="mt-2 max-w-[10rem]">
+                <Input type="number" min={1} label="Orden" value={orden} onChange={(e) => setOrden(e.target.value)} />
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={ordenarPorTipoDocumento}
+                onChange={(e) => setOrdenarPorTipoDocumento(e.target.checked)}
+                className="rounded border-border text-primary focus:ring-primary/30"
+              />
+              Ordenar las FILAS de esta categoria por "Tipo de documento"
+            </label>
+            <p className="mt-1 text-xs text-slate-400">
+              Para categorias "variante" que agrupan varios tipos de material bajo un solo nombre (ej. "Sello de
+              tal", que puede tener libros, revistas, folletos y publicaciones mezclados).
+            </p>
+            {ordenarPorTipoDocumento && !campos.some((c) => normalizarTexto(c.etiqueta) === 'tipo de documento') ? (
+              <p className="mt-1 text-xs text-amber-600">
+                Esta categoria todavia no tiene un campo llamado "Tipo de documento" (agregalo abajo, en "Campos
+                propios de esta categoria") - sin ese campo, este check no tiene ningun dato del que guiarse.
+              </p>
+            ) : null}
+          </div>
 
           <div>
             <span className="text-sm font-medium text-slate-700">Campos comunes (ya vienen incluidos)</span>

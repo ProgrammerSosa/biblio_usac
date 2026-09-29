@@ -14,6 +14,8 @@ const { ROLES, ESTADOS_REVISION } = require('../utils/constants');
 const { CATEGORIAS_POR_DEFECTO } = require('../scripts/seed');
 const {
   construirGruposColumnas,
+  categoriasOrdenadasParaReporte,
+  ordenarFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
   calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,
@@ -721,5 +723,123 @@ describe('Tamaño de hoja oficio y margenes del PDF', () => {
     const hexNombreCategoria = Buffer.from('Diccionario', 'latin1').toString('hex');
     const apariciones = textoDescomprimido.toLowerCase().split(hexNombreCategoria).length - 1;
     expect(apariciones).toBeGreaterThan(1);
+  });
+
+  test('cada categoria empieza en una hoja nueva, aunque le hubiera quedado espacio en la anterior', async () => {
+    // 1 sola fila corta por categoria - de sobra para las 2 en la misma pagina si no se forzara
+    // el salto. Si el PDF da exactamente 2 paginas (no 1), confirma que si se forzo.
+    await Catalog.create({
+      categoria: 'DICCIONARIO',
+      autor: 'Autor',
+      titulo: 'Titulo diccionario',
+      atributos: { EDITORIAL: 'Ed' },
+      registradoPor: manager._id,
+      enviado: true,
+      estadoRevision: ESTADOS_REVISION.APROBADO,
+    });
+    await Catalog.create({
+      categoria: 'REVISTA',
+      autor: 'Autor',
+      titulo: 'Titulo revista',
+      atributos: { EDITORIAL: 'Ed', ISSN: '1234-5678', VOLUMEN: '1' },
+      registradoPor: manager._id,
+      enviado: true,
+      estadoRevision: ESTADOS_REVISION.APROBADO,
+    });
+
+    const res = await api(app)
+      .get('/api/exports/catalog')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+
+    expect(res.status).toBe(200);
+    const crudo = res.body.toString('latin1');
+    const paginas = crudo.match(/\/Type\s*\/Page[^s]/g) || [];
+    expect(paginas.length).toBe(2);
+  });
+
+  test('categoriasOrdenadasParaReporte respeta "orden" (no alfabetico a secas), igual que GET /api/categories', async () => {
+    // No se puede verificar esto inspeccionando el texto del PDF: pdfkit divide el texto en
+    // varios trozos hexadecimales cuando hay kerning entre letras (ej. "Revista" sale como
+    // "<5265> 15 <766973746120283129>", partido en 2), asi que buscar el nombre completo como
+    // un solo string hex no es confiable. Se prueba en cambio la funcion que exportCatalogPdf
+    // usa para pedir las categorias, directo contra la base de datos real.
+    await Category.updateOne({ clave: 'DICCIONARIO' }, { orden: 5 });
+    await Category.updateOne({ clave: 'REVISTA' }, { orden: 1 });
+
+    const categorias = await categoriasOrdenadasParaReporte(['DICCIONARIO', 'REVISTA', 'FOLLETO']);
+
+    // Revista (orden 1) primero, Folleto (orden 0 por defecto) despues, Diccionario (orden 5)
+    // al final - no alfabetico (que hubiera sido Diccionario, Folleto, Revista).
+    expect(categorias.map((c) => c.clave)).toEqual(['FOLLETO', 'REVISTA', 'DICCIONARIO']);
+  });
+});
+
+describe('ordenarFilasPorTipoDocumentoSiAplica (categorias "variante" con sello, ej.)', () => {
+  function fila(tipoDocumento) {
+    return { atributos: { TIPO_DE_DOCUMENTO: tipoDocumento } };
+  }
+
+  const categoriaConCheck = {
+    ordenarPorTipoDocumento: true,
+    campos: [{ clave: 'TIPO_DE_DOCUMENTO', etiqueta: 'Tipo de documento', requerido: false }],
+  };
+
+  test('sin el check activo, las filas se quedan en el orden que traian (no se toca nada)', () => {
+    const filas = [fila('Revista'), fila('Libro'), fila('Folleto')];
+    const categoriaSinCheck = { ...categoriaConCheck, ordenarPorTipoDocumento: false };
+
+    const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaSinCheck, filas);
+
+    expect(resultado).toBe(filas); // ni siquiera copia el arreglo si no aplica.
+  });
+
+  test('con el check activo pero sin campo "Tipo de documento" en la categoria, tampoco se toca nada', () => {
+    const filas = [fila('Revista'), fila('Libro')];
+    const categoriaSinCampo = { ordenarPorTipoDocumento: true, campos: [{ clave: 'ISBN', etiqueta: 'ISBN' }] };
+
+    const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaSinCampo, filas);
+
+    expect(resultado).toBe(filas);
+  });
+
+  test('con el check activo y el campo presente, reordena Libro, Revista, Folleto, Publicaciones Institucionales', () => {
+    const revista = fila('Revista');
+    const publicaciones = fila('Publicaciones Institucionales');
+    const libro = fila('Libro');
+    const folleto = fila('Folleto');
+    const filas = [revista, publicaciones, libro, folleto];
+
+    const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaConCheck, filas);
+
+    expect(resultado).toEqual([libro, revista, folleto, publicaciones]);
+  });
+
+  test('un valor que no coincide con ninguno de los 4 (o vacio) se manda al final, sin romper nada', () => {
+    const revista = fila('Revista');
+    const desconocido = fila('Algo que no es ninguno de los 4');
+    const libro = fila('Libro');
+    const sinValor = { atributos: {} };
+    const filas = [desconocido, revista, sinValor, libro];
+
+    const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaConCheck, filas);
+
+    expect(resultado.slice(0, 2)).toEqual([libro, revista]);
+    expect(resultado.slice(2)).toEqual(expect.arrayContaining([desconocido, sinValor]));
+  });
+
+  test('no distingue mayusculas/acentos al comparar el valor (Espanol-style normalizarTexto)', () => {
+    const libroMayusculas = fila('LIBRO');
+    const revistaConEspacios = fila('  Revista  ');
+    const filas = [revistaConEspacios, libroMayusculas];
+
+    const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaConCheck, filas);
+
+    expect(resultado).toEqual([libroMayusculas, revistaConEspacios]);
   });
 });

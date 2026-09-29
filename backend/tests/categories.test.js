@@ -139,6 +139,43 @@ describe('CRUD de categorias', () => {
       .set('Authorization', `Bearer ${managerToken}`);
     expect(listadoCompleto.body.data.map((c) => c.clave)).toContain('ENCICLOPEDIA');
   });
+
+  test('"orden" decide en que secuencia salen las categorias (no alfabetico) - las que empatan se desempatan por nombre', async () => {
+    await Category.updateOne({ clave: 'REVISTA' }, { orden: 1 });
+    await Category.updateOne({ clave: 'LIBRO' }, { orden: 2 });
+    await Category.updateOne({ clave: 'FOLLETO' }, { orden: 2 });
+    // Diccionario, Enciclopedia y Publicaciones se quedan en el orden por defecto (0), asi que
+    // van primero, ordenadas entre ellas por nombre (alfabetico): Diccionario, Enciclopedia,
+    // Publicaciones Institucionales.
+
+    const res = await api(app).get('/api/categories').set('Authorization', `Bearer ${userToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((c) => c.clave)).toEqual([
+      'DICCIONARIO',
+      'ENCICLOPEDIA',
+      'PUBLICACIONES_INSTITUCIONALES',
+      'REVISTA',
+      'FOLLETO',
+      'LIBRO',
+    ]);
+  });
+
+  test('una categoria nueva sin "orden" queda en 0 por defecto, y se puede cambiar despues', async () => {
+    const creada = await api(app)
+      .post('/api/categories')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ nombre: 'Tesis', campos: [] });
+    expect(creada.body.data.orden).toBe(0);
+
+    const editada = await api(app)
+      .patch(`/api/categories/${creada.body.data._id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ orden: 5 });
+
+    expect(editada.status).toBe(200);
+    expect(editada.body.data.orden).toBe(5);
+  });
 });
 
 describe('El catalogo usa las categorias dinamicas', () => {

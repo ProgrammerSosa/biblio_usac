@@ -231,6 +231,38 @@ function esCampoNotas(campo) {
   return etiqueta === 'notas' || etiqueta === 'nota';
 }
 
+// Orden fijo para categorias "variante" (ej. materiales con un sello especial) que agrupan
+// libros/revistas/folletos/publicaciones bajo una categoria propia, usando su campo "Tipo de
+// documento" para decir cual es cual - ver ordenarFilasPorTipoDocumentoSiAplica.
+const ORDEN_TIPO_DOCUMENTO = {
+  libro: 1,
+  revista: 2,
+  folleto: 3,
+  'publicaciones institucionales': 4,
+};
+
+function esCampoTipoDocumento(campo) {
+  return normalizarTexto(campo.etiqueta) === 'tipo de documento';
+}
+
+// Si la categoria tiene "ordenarPorTipoDocumento" activo (ver Gestion de Categorias) y tiene un
+// campo "Tipo de documento", sus filas en el reporte no van en el orden normal - se reordenan
+// segun ese valor (Libro, Revista, Folleto, Publicaciones Institucionales, en ese orden fijo).
+// Un valor que no coincide con ninguno de los 4 (o que esta vacio) se manda al final, sin
+// romper nada. Si la categoria no tiene el campo, o no tiene el check activo, las filas se
+// quedan en el orden que ya traian (no se toca nada).
+function ordenarFilasPorTipoDocumentoSiAplica(categoriaDoc, filas) {
+  if (!categoriaDoc.ordenarPorTipoDocumento) return filas;
+  const campoTipoDocumento = (categoriaDoc.campos || []).find(esCampoTipoDocumento);
+  if (!campoTipoDocumento) return filas;
+
+  const rangoDe = (fila) => {
+    const valor = normalizarTexto(fila.atributos && fila.atributos[campoTipoDocumento.clave]);
+    return ORDEN_TIPO_DOCUMENTO[valor] ?? Number.MAX_SAFE_INTEGER;
+  };
+  return [...filas].sort((a, b) => rangoDe(a) - rangoDe(b));
+}
+
 const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT : null);
 const estadoFisicoTexto = (row) => row.estadoFisico || 'N/A';
 const estadoRevisionTexto = (row) => (row.deBaja ? 'DB' : ESTADO_LETRAS[row.estadoRevision] || row.estadoRevision);
@@ -475,6 +507,13 @@ function agruparPorCategoria(registros) {
   return grupos;
 }
 
+// "orden" es el que la Manager configura desde Gestion de Categorias para decidir en que
+// secuencia van las categorias en el reporte (ej. Libro, Revista, Folleto...) - nombre solo
+// desempata cuando 2 categorias quedan con el mismo orden (todas en 0 por defecto).
+function categoriasOrdenadasParaReporte(claves) {
+  return Category.find({ clave: { $in: claves } }).sort({ orden: 1, nombre: 1 });
+}
+
 async function exportCatalogPdf(req, res, next) {
   try {
     const { estadoRevision, categoria, buscar, registradoPor, anioRegistro, sort } = req.query;
@@ -523,7 +562,7 @@ async function exportCatalogPdf(req, res, next) {
     });
 
     const grupos = agruparPorCategoria(registros);
-    const categorias = await Category.find({ clave: { $in: [...grupos.keys()] } }).sort({ nombre: 1 });
+    const categorias = await categoriasOrdenadasParaReporte([...grupos.keys()]);
     const coloresPorRegistro = calcularColoresPorRegistro(registros);
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -557,9 +596,19 @@ async function exportCatalogPdf(req, res, next) {
     doc.y = dibujarLeyendaColores(doc, doc.page.margins.left, doc.y);
     doc.moveDown(1);
 
+    // Cada categoria empieza en una hoja nueva (nunca comparte pagina con la anterior, aunque
+    // le hubiera quedado espacio) - a pedido del usuario, para poder separar el reporte impreso
+    // en un folder por categoria sin tener que cortar ninguna hoja a la mitad.
+    let esPrimeraCategoriaDibujada = true;
     for (const categoriaDoc of categorias) {
-      const filas = grupos.get(categoriaDoc.clave) || [];
-      if (filas.length === 0) continue;
+      const filasCategoria = grupos.get(categoriaDoc.clave) || [];
+      if (filasCategoria.length === 0) continue;
+      const filas = ordenarFilasPorTipoDocumentoSiAplica(categoriaDoc, filasCategoria);
+
+      if (!esPrimeraCategoriaDibujada) {
+        doc.addPage();
+      }
+      esPrimeraCategoriaDibujada = false;
 
       // El ancho de la columna ID se resta aparte porque ya no es una columna mas de
       // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
@@ -584,6 +633,8 @@ async function exportCatalogPdf(req, res, next) {
 module.exports = {
   exportCatalogPdf,
   construirGruposColumnas,
+  categoriasOrdenadasParaReporte,
+  ordenarFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
   calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,

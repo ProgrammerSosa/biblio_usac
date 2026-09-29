@@ -37,6 +37,11 @@ const ETIQUETAS_COMUNES_NORMALIZADAS = new Set([
   'no de inventario',
 ]);
 
+function normalizarOrden(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
 function normalizarComunesDesactivados(valores) {
   if (!Array.isArray(valores)) return [];
   return [...new Set(valores.filter((v) => CLAVES_COMUNES_DESACTIVABLES.includes(v)))];
@@ -68,7 +73,9 @@ function normalizarCampos(campos) {
 async function listCategories(req, res, next) {
   try {
     const filtro = req.query.incluirInactivas === 'true' ? {} : { activo: true };
-    const categorias = await Category.find(filtro).sort({ nombre: 1 });
+    // "orden" decide el orden en el reporte PDF (y aqui). Las que empatan en orden (ej. todas
+    // en 0, el default) se desempatan por nombre para que el orden no quede al azar.
+    const categorias = await Category.find(filtro).sort({ orden: 1, nombre: 1 });
     return ok(res, categorias);
   } catch (err) {
     return next(err);
@@ -77,7 +84,7 @@ async function listCategories(req, res, next) {
 
 async function createCategory(req, res, next) {
   try {
-    const { nombre, campos, camposComunesDesactivados } = req.body;
+    const { nombre, campos, camposComunesDesactivados, orden, ordenarPorTipoDocumento } = req.body;
 
     if (!nombre || !nombre.trim()) {
       return fail(res, 'El nombre de la categoria es obligatorio');
@@ -103,6 +110,8 @@ async function createCategory(req, res, next) {
       nombre: nombre.trim(),
       campos: camposNormalizados,
       camposComunesDesactivados: normalizarComunesDesactivados(camposComunesDesactivados),
+      orden: normalizarOrden(orden),
+      ordenarPorTipoDocumento: ordenarPorTipoDocumento === true,
     });
 
     await registrarAuditoria({
@@ -143,6 +152,14 @@ async function updateCategory(req, res, next) {
 
     if (req.body.camposComunesDesactivados !== undefined) {
       categoria.camposComunesDesactivados = normalizarComunesDesactivados(req.body.camposComunesDesactivados);
+    }
+
+    if (req.body.orden !== undefined) {
+      categoria.orden = normalizarOrden(req.body.orden);
+    }
+
+    if (req.body.ordenarPorTipoDocumento !== undefined) {
+      categoria.ordenarPorTipoDocumento = req.body.ordenarPorTipoDocumento === true;
     }
 
     await categoria.save();
