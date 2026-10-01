@@ -418,6 +418,8 @@ async function confirmarImportacion(req, res, next) {
     }
 
     let creados = 0;
+    let primerRegistroId = null;
+    const categoriasImportadas = new Set();
     const errores = [];
 
     for (const item of items) {
@@ -447,19 +449,33 @@ async function confirmarImportacion(req, res, next) {
             origenImportacion: archivoOrigen ? String(archivoOrigen).trim() : null,
           });
 
-          await registrarAuditoria({
-            accion: ACCIONES_AUDITORIA.CREAR,
-            entidad: 'Catalog',
-            entidadId: registro._id,
-            usuario: req.user.userId,
-            detalles: { categoria: registro.categoria, importado: true },
-          });
-
+          if (!primerRegistroId) primerRegistroId = registro._id;
+          categoriasImportadas.add(registro.categoria);
           creados += 1;
         } catch (err) {
           errores.push({ titulo: item.titulo, error: err.message });
         }
       }
+    }
+
+    // Una sola auditoria para todo el lote (quien importo, cuantos registros, que categorias),
+    // en vez de una auditoria por cada registro importado - una importacion real facilmente mete
+    // cientos de filas de una sola vez, y rastrear cada una por separado solo ensucia el
+    // historial sin aportar nada que "importado: true" en cada registro ya no diga.
+    if (creados > 0) {
+      await registrarAuditoria({
+        accion: ACCIONES_AUDITORIA.CREAR,
+        entidad: 'Catalog',
+        entidadId: primerRegistroId,
+        usuario: req.user.userId,
+        detalles: {
+          importado: true,
+          lote: true,
+          archivoOrigen: archivoOrigen ? String(archivoOrigen).trim() : null,
+          creados,
+          categorias: [...categoriasImportadas].join(', '),
+        },
+      });
     }
 
     return ok(res, { creados, errores }, `${creados} material(es) importado(s)`);
