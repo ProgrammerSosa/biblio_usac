@@ -1,3 +1,5 @@
+const { LIMITE_ARCHIVO_MB } = require('../utils/constants');
+
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
   if (err.name === 'ValidationError') {
     const detalles = Object.values(err.errors).map((e) => e.message);
@@ -21,7 +23,8 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
   }
 
   if (err.name === 'MulterError') {
-    const mensaje = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo es demasiado grande' : err.message;
+    const mensaje =
+      err.code === 'LIMIT_FILE_SIZE' ? `El archivo no puede pesar mas de ${LIMITE_ARCHIVO_MB} MB` : err.message;
     return res.status(400).json({ success: false, error: mensaje });
   }
 

@@ -409,6 +409,67 @@ describe('POST /api/catalog/importar (previsualizar)', () => {
     // Sin ninguna fila utilizable en ninguna hoja, no hay nada que previsualizar.
     expect(res.status).toBe(400);
   });
+
+  test('no hace falta traer todas las categorias: se importa la hoja reconocida y se avisa de la que no (la plantilla vacia no se avisa)', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const libros = workbook.addWorksheet('Libros');
+    libros.addRow(['Autor', 'Titulo', 'Editorial', 'ISBN', 'Tipo de documento']);
+    libros.addRow(['Autor Solo Libros', 'Libro Que Si Entra', 'Ed', '1', 'Fisico']);
+    const sueltas = workbook.addWorksheet('Apuntes sueltos');
+    sueltas.addRow(['Autor', 'Titulo']);
+    sueltas.addRow(['Alguien', 'Algo que no es una categoria']);
+    const plantilla = workbook.addWorksheet('Revistas');
+    plantilla.addRow(['Autor', 'Titulo']); // solo encabezado: hoja sin llenar
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.hojas.map((h) => h.categoria)).toEqual(['LIBRO']);
+    expect(res.body.data.hojasOmitidas).toEqual([
+      { hoja: 'Apuntes sueltos', motivo: 'No hay ninguna categoria con ese nombre' },
+    ]);
+  });
+
+  test('una categoria nueva se reconoce por el nombre de su hoja (tambien en plural), sin tocar codigo', async () => {
+    await Category.create({ clave: 'MAPA', nombre: 'Mapa', campos: [] });
+
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Mapas');
+    hoja.addRow(['Autor', 'Titulo']);
+    hoja.addRow(['Cartografo', 'Mapa de Guatemala']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.hojas).toHaveLength(1);
+    expect(res.body.data.hojas[0].categoria).toBe('MAPA');
+    expect(res.body.data.hojas[0].items[0].titulo).toBe('Mapa de Guatemala');
+  });
+
+  test('si ninguna hoja sirve, el error dice que hojas con datos se encontraron y por que no se usaron', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const hoja = workbook.addWorksheet('Hoja1');
+    hoja.addRow(['Autor', 'Titulo']);
+    hoja.addRow(['Alguien', 'Algo']);
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    const res = await api(app)
+      .post('/api/catalog/importar')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .attach('archivo', buffer, 'prueba.xlsx');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('"Hoja1"');
+    expect(res.body.error).toContain('No hay ninguna categoria con ese nombre');
+  });
 });
 
 describe('POST /api/catalog/importar/confirmar', () => {

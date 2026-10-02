@@ -380,19 +380,22 @@ async function previsualizarImportacion(req, res, next) {
     const categorias = await Category.find({ activo: true });
     const categoriasPorClave = new Map(categorias.map((c) => [c.clave, c]));
 
-    const hojas = await previsualizarWorkbook(req.file.buffer, categoriasPorClave);
+    const { hojas, hojasOmitidas } = await previsualizarWorkbook(req.file.buffer, categoriasPorClave);
 
     if (hojas.length === 0) {
+      const detalle = hojasOmitidas.length
+        ? ` Hojas con datos que se encontraron: ${hojasOmitidas.map((h) => `"${h.hoja}" (${h.motivo})`).join('; ')}.`
+        : '';
       return fail(
         res,
-        'No se encontraron hojas reconocibles (Libros, Revistas, Diccionarios, Enciclopedias, Folletos, Publicacion institucional) con datos'
+        `No se encontro ninguna hoja que se pueda importar. El nombre de cada hoja debe ser el de una categoria (ej. Libros, Revistas, Tesis, Docs de Donacion) y los encabezados deben estar en la fila 1.${detalle}`
       );
     }
 
     const totalItems = hojas.reduce((suma, h) => suma + h.items.length, 0);
     const totalValidos = hojas.reduce((suma, h) => suma + h.items.filter((i) => i.valido).length, 0);
 
-    return ok(res, { hojas, totalItems, totalValidos });
+    return ok(res, { hojas, hojasOmitidas, totalItems, totalValidos });
   } catch (err) {
     if (err.message && err.message.toLowerCase().includes('central directory')) {
       return fail(res, 'El archivo no parece ser un Excel valido (.xlsx)');
@@ -425,6 +428,7 @@ async function confirmarImportacion(req, res, next) {
     for (const item of items) {
       if (categoriasPermitidas && !categoriasPermitidas.includes(item.categoria)) {
         errores.push({
+          categoria: item.categoria,
           titulo: item.titulo,
           error: `No tienes permiso para registrar materiales de la categoria ${item.categoria}`,
         });
@@ -453,7 +457,7 @@ async function confirmarImportacion(req, res, next) {
           categoriasImportadas.add(registro.categoria);
           creados += 1;
         } catch (err) {
-          errores.push({ titulo: item.titulo, error: err.message });
+          errores.push({ categoria: item.categoria, titulo: item.titulo, error: err.message });
         }
       }
     }

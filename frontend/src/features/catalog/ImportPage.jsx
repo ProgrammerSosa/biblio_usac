@@ -8,8 +8,29 @@ import Button from '../../shared/components/Button';
 import Badge from '../../shared/components/Badge';
 import AlertBanner from '../../shared/components/AlertBanner';
 
+// Debe coincidir con LIMITE_ARCHIVO_MB del backend (utils/constants.js).
+const LIMITE_MB = 20;
+
 function claveItem(categoria, fila) {
   return `${categoria}-${fila}`;
+}
+
+function motivoNoImportado(item) {
+  if (!item.valido) return item.errores.join(', ');
+  if (item.camposFaltantes?.length > 0) {
+    return `Faltaban campos obligatorios (${item.camposFaltantes.join(', ')}) y no la marcaste para importar`;
+  }
+  return 'La desmarcaste y no se importo';
+}
+
+// Cuando Render tumba la peticion (502 por falta de memoria con un Excel muy pesado) el navegador
+// la reporta como error de red/CORS y no llega ninguna respuesta con mensaje - sin esto, el
+// usuario solo veria "No se pudo leer el archivo" sin ninguna pista de que hacer.
+function mensajeDeError(err, fallback) {
+  if (!err.response || [502, 503, 504].includes(err.response.status)) {
+    return `El servidor no pudo procesar el archivo. Suele pasar cuando el Excel es muy pesado o trae mucho formato (limite ${LIMITE_MB} MB): copia solo las filas con datos a un libro nuevo (Pegado especial > Valores) y vuelve a subirlo. Si el archivo ya es chico, el servidor pudo estar despertando: espera un minuto e intenta de nuevo.`;
+  }
+  return getErrorMessage(err, fallback);
 }
 
 export default function ImportPage() {
@@ -18,6 +39,7 @@ export default function ImportPage() {
   const [archivo, setArchivo] = useState(null);
   const [arrastrando, setArrastrando] = useState(false);
   const [hojas, setHojas] = useState(null);
+  const [hojasOmitidas, setHojasOmitidas] = useState([]);
   const [seleccion, setSeleccion] = useState({});
   const [colapsadas, setColapsadas] = useState(new Set());
   const [analizando, setAnalizando] = useState(false);
@@ -31,6 +53,13 @@ export default function ImportPage() {
     const nombre = nuevo.name.toLowerCase();
     if (!nombre.endsWith('.xlsx') && !nombre.endsWith('.xls')) {
       setError('El archivo debe ser un Excel (.xlsx o .xls)');
+      return;
+    }
+    if (nuevo.size > LIMITE_MB * 1024 * 1024) {
+      const mb = (nuevo.size / 1024 / 1024).toFixed(1);
+      setError(
+        `El archivo pesa ${mb} MB y el limite es ${LIMITE_MB} MB. Copia solo las filas con datos a un libro nuevo (Pegado especial > Valores) y vuelve a subirlo.`
+      );
       return;
     }
     setError('');
@@ -67,12 +96,13 @@ export default function ImportPage() {
         });
       });
       setHojas(res.data.data.hojas);
+      setHojasOmitidas(res.data.data.hojasOmitidas || []);
       setSeleccion(nuevaSeleccion);
       // Todas empiezan cerradas para que la pagina no se estire con archivos grandes;
       // se abren una por una segun lo que se quiera revisar.
       setColapsadas(todasColapsadas);
     } catch (err) {
-      setError(getErrorMessage(err, 'No se pudo leer el archivo'));
+      setError(mensajeDeError(err, 'No se pudo leer el archivo'));
     } finally {
       setAnalizando(false);
     }
@@ -99,10 +129,19 @@ export default function ImportPage() {
 
   async function handleConfirmar() {
     const items = [];
+    const noImportados = [];
     hojas.forEach((hoja) => {
       hoja.items.forEach((item) => {
         const estado = seleccion[claveItem(hoja.categoria, item.fila)];
-        if (!estado?.incluir) return;
+        if (!estado?.incluir) {
+          noImportados.push({
+            categoria: hoja.categoria,
+            fila: item.fila,
+            titulo: item.titulo,
+            motivo: motivoNoImportado(item),
+          });
+          return;
+        }
         items.push({ ...item, copias: estado.usarCopias ? item.copias : 1 });
       });
     });
@@ -116,11 +155,11 @@ export default function ImportPage() {
     setError('');
     try {
       const res = await catalogApi.importarConfirmar(items, archivo?.name);
-      setResultado(res.data.data);
+      setResultado({ ...res.data.data, hojasOmitidas, noImportados });
       setHojas(null);
       setArchivo(null);
     } catch (err) {
-      setError(getErrorMessage(err, 'No se pudo completar la importacion'));
+      setError(mensajeDeError(err, 'No se pudo completar la importacion'));
     } finally {
       setConfirmando(false);
     }
@@ -142,12 +181,9 @@ export default function ImportPage() {
         <h1 className="text-xl font-semibold text-primary-dark">Importar desde Excel</h1>
       </div>
       <p className="max-w-2xl text-sm text-slate-500">
-        Sube el archivo con las hojas Libros, Revistas, Diccionarios, Enciclopedias, Folletos o Publicacion
-        institucional. Primero te muestro lo que se detecto para que revises antes de guardar nada. Para varias
-        copias del mismo material, agrega una fila por cada ejemplar fisico (una fila = una copia): si el autor,
-        titulo, edicion e idioma coinciden, se agrupan solas como copias del mismo registro, sin importar el
-        estado fisico de cada una. Si mas adelante aparece otro ejemplar identico, se agrega igual. El No. de
-        Inventario ya no se escribe en el Excel: se asigna solo cuando cada ejemplar se aprueba.
+        Excel de maximo {LIMITE_MB} MB. Cada hoja debe llamarse como su categoria (ej. Libros, Tesis) y los
+        encabezados van en la fila 1; solo se importan las hojas que coincidan. Una fila = un ejemplar: las filas
+        iguales se agrupan como copias. Antes de guardar revisas lo detectado.
       </p>
 
       <AlertBanner>{error}</AlertBanner>
@@ -163,14 +199,43 @@ export default function ImportPage() {
             listos para que Admin o Manager los revisen en Aprobaciones (por si algo necesita correccion antes de
             darlos por buenos).
           </p>
+          {resultado.hojasOmitidas?.length > 0 ? (
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-medium text-secondary">
+                {resultado.hojasOmitidas.length} hoja(s) del Excel no se importaron:
+              </p>
+              <ul className="flex flex-col gap-1 text-xs text-slate-600">
+                {resultado.hojasOmitidas.map((h) => (
+                  <li key={h.hoja}>
+                    <strong>{h.hoja}</strong>: {h.motivo}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {resultado.noImportados?.length > 0 ? (
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-medium text-secondary">
+                {resultado.noImportados.length} material(es) no se importaron (los dejaste sin marcar):
+              </p>
+              <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto text-xs text-slate-600">
+                {resultado.noImportados.map((n) => (
+                  <li key={`${n.categoria}-${n.fila}`}>
+                    <strong>{etiquetaDe(n.categoria) || n.categoria}</strong>, fila {n.fila} - {n.titulo || 'Sin titulo'}: {n.motivo}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {resultado.errores.length > 0 ? (
             <div className="mt-4">
               <p className="mb-2 text-sm font-medium text-secondary">
-                {resultado.errores.length} no se pudieron crear:
+                {resultado.errores.length} no se pudieron crear al guardar:
               </p>
-              <ul className="flex flex-col gap-1 text-xs text-slate-600">
+              <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto text-xs text-slate-600">
                 {resultado.errores.map((e, idx) => (
                   <li key={idx}>
+                    {e.categoria ? <strong>{etiquetaDe(e.categoria) || e.categoria}: </strong> : null}
                     <strong>{e.titulo || 'Sin titulo'}</strong>: {e.error}
                   </li>
                 ))}
@@ -245,6 +310,19 @@ export default function ImportPage() {
               </Button>
             </div>
           </div>
+
+          {hojasOmitidas.length > 0 ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+              <strong>Hojas del Excel que no se importaron:</strong>
+              <ul className="mt-1 list-disc pl-5">
+                {hojasOmitidas.map((h) => (
+                  <li key={h.hoja}>
+                    <strong>{h.hoja}</strong>: {h.motivo}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {/* Contenedor unico con su propio scroll: sin importar cuantas categorias se
               abran a la vez, la pagina en si nunca crece mas alla de la pantalla. */}

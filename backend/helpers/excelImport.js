@@ -21,6 +21,18 @@ const HOJA_A_CATEGORIA = {
   'folletos': 'FOLLETO',
   'publicacion institucional': 'PUBLICACIONES_INSTITUCIONALES',
   'publicaciones institucionales': 'PUBLICACIONES_INSTITUCIONALES',
+  'tesis': 'TESIS',
+  // Excel limita el nombre de una hoja a 31 caracteres, por eso las hojas de las categorias con
+  // sello traen el nombre abreviado (ej. "FacuJuri y Soci") aunque la categoria tenga el
+  // nombre formal completo.
+  'docs con numero inventario': 'DOCS_CON_NUMERO_DE_INVENTARIO',
+  'docs con numero de inventario': 'DOCS_CON_NUMERO_DE_INVENTARIO',
+  'docs de donacion': 'DOCS_DE_DONACION',
+  'docs sello de bibliocentral': 'DOCS_SELLO_DE_BIBLIOCENTRAL',
+  'docs con sello facueconomicas': 'DOCS_CON_SELLO_FACUECONOMICAS',
+  'docs con sello faculeconomicas': 'DOCS_CON_SELLO_FACUECONOMICAS',
+  'docs sello facujuri y soci': 'DOCS_SELLO_FACUJURI_Y_SOCI',
+  'docs facultad humanidades': 'DOCS_FACULTAD_HUMANIDADES',
 };
 
 // Encabezado normalizado de columna -> donde cae ese valor. Los campos propios de cada
@@ -34,6 +46,11 @@ const CAMPOS_COMUNES = {
   edicion: 'edicion',
   lugar: 'lugar',
   'paginas impresas': 'paginasImpresas',
+  // Variantes abreviadas que traen los Excel reales ("Pags.", "Pag.", "Págs").
+  'pags.': 'paginasImpresas',
+  'pag.': 'paginasImpresas',
+  pags: 'paginasImpresas',
+  pag: 'paginasImpresas',
   'estado fisico': 'estadoFisico',
 };
 
@@ -137,25 +154,51 @@ function agruparPorCopias(items) {
   });
 }
 
+// A que categoria pertenece una hoja: primero la tabla de nombres abreviados (HOJA_A_CATEGORIA)
+// y, si no esta ahi, por el nombre o la clave de cualquier categoria que exista (con o sin "s"
+// final, ej. hoja "Mapas" para la categoria "Mapa"). Asi una categoria nueva ya se importa sin
+// tocar codigo, con solo ponerle a la hoja el mismo nombre.
+function resolverCategoria(nombreHoja, categoriasPorClave) {
+  const normalizado = normalizarTexto(nombreHoja);
+
+  const porAlias = HOJA_A_CATEGORIA[normalizado];
+  if (porAlias && categoriasPorClave.has(porAlias)) return porAlias;
+
+  for (const categoria of categoriasPorClave.values()) {
+    const nombres = [categoria.nombre, categoria.clave.replace(/_/g, ' ')].map(normalizarTexto);
+    if (nombres.some((n) => normalizado === n || normalizado === `${n}s` || normalizado === `${n}es`)) {
+      return categoria.clave;
+    }
+  }
+  return null;
+}
+
 /**
- * Lee un workbook de Excel y devuelve, por cada hoja reconocida, la lista de items
- * detectados (sin guardar nada en la base todavia). categoriasPorClave es un Map de
- * clave de categoria -> documento de Category (para saber que atributos aplican y
- * cuales son obligatorios).
+ * Lee un workbook de Excel y devuelve { hojas, hojasOmitidas } (sin guardar nada en la base
+ * todavia). "hojas" trae, por cada hoja que corresponde a una categoria y tiene datos, los
+ * items detectados; no hace falta que el archivo traiga todas las categorias, solo las que se
+ * quieran importar. "hojasOmitidas" lista las hojas con datos que se dejaron fuera y por que,
+ * para que no se pierdan en silencio. categoriasPorClave es un Map de clave de categoria ->
+ * documento de Category (para saber que atributos aplican y cuales son obligatorios).
  */
 async function previsualizarWorkbook(buffer, categoriasPorClave) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
 
   const resultado = [];
+  const hojasOmitidas = [];
 
   for (const worksheet of workbook.worksheets) {
-    const nombreHoja = normalizarTexto(worksheet.name);
-    const claveCategoria = HOJA_A_CATEGORIA[nombreHoja];
-    if (!claveCategoria) continue;
+    // Una hoja vacia o con solo encabezado (plantilla sin llenar) no es nada que avisar.
+    const tieneDatos = worksheet.actualRowCount > 1;
+
+    const claveCategoria = resolverCategoria(worksheet.name, categoriasPorClave);
+    if (!claveCategoria) {
+      if (tieneDatos) hojasOmitidas.push({ hoja: worksheet.name.trim(), motivo: 'No hay ninguna categoria con ese nombre' });
+      continue;
+    }
 
     const categoria = categoriasPorClave.get(claveCategoria);
-    if (!categoria) continue;
 
     const encabezados = leerEncabezados(worksheet);
     const clavesAtributos = new Map(categoria.campos.map((c) => [normalizarTexto(c.etiqueta), c.clave]));
@@ -272,10 +315,15 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
         items: agruparPorCopias(items),
         camposDesconocidos,
       });
+    } else if (tieneDatos) {
+      hojasOmitidas.push({
+        hoja: worksheet.name.trim(),
+        motivo: 'No se encontraron filas con autor o titulo (revisa que los encabezados esten en la fila 1)',
+      });
     }
   }
 
-  return resultado;
+  return { hojas: resultado, hojasOmitidas };
 }
 
 module.exports = { previsualizarWorkbook, normalizarTexto };

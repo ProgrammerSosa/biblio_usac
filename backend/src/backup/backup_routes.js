@@ -1,14 +1,14 @@
 const express = require('express');
 const multer = require('multer');
 const { verifyJWT, checkRole } = require('../../middlewares/auth');
-const { ROLES } = require('../../utils/constants');
+const { ROLES, LIMITE_ARCHIVO_MB } = require('../../utils/constants');
 const { exportarRespaldo, restaurarRespaldo } = require('./backup_controller');
 
 const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: LIMITE_ARCHIVO_MB * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const nombre = file.originalname.toLowerCase();
     if (nombre.endsWith('.xlsx') || nombre.endsWith('.xls')) {

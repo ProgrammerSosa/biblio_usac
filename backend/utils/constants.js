@@ -35,6 +35,10 @@ const ACCIONES_AUDITORIA = Object.freeze({
 
 const PALABRAS_DANO = ['dañ', 'dani', 'humedad', 'mancha', 'rasgad', 'roto', 'rota', 'deteriorad', 'polilla', 'hongo'];
 
+// Tamano maximo de un Excel subido (importar y restaurar respaldo). El servidor tiene poca
+// memoria: un Excel muy pesado hace que se caiga al leerlo, asi que es mejor rechazarlo antes.
+const LIMITE_ARCHIVO_MB = 20;
+
 function tieneDanoFisico(estadoFisico) {
   if (!estadoFisico) return false;
   const texto = estadoFisico.toLowerCase();
@@ -46,5 +50,6 @@ module.exports = {
   ESTADOS_REVISION,
   ESTADOS_INVITACION,
   ACCIONES_AUDITORIA,
+  LIMITE_ARCHIVO_MB,
   tieneDanoFisico,
 };
