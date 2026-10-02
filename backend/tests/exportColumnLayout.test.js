@@ -1,5 +1,6 @@
 require('./setupEnv');
 
+const zlib = require('zlib');
 const PDFDocument = require('pdfkit');
 const { connect, closeDatabase, clearDatabase } = require('./helpers/testDb');
 const { seedCategoriasDePrueba } = require('./helpers/seedCategorias');
@@ -897,5 +898,88 @@ describe('ordenarFilasPorTipoDocumentoSiAplica (categorias "variante" con sello,
     const resultado = ordenarFilasPorTipoDocumentoSiAplica(categoriaConCheck, filas);
 
     expect(resultado).toEqual([libroMayusculas, revistaConEspacios]);
+  });
+});
+
+// pdfkit comprime el contenido de cada hoja y parte el texto en varios trozos hexadecimales
+// (kerning), asi que buscar un texto directo en los bytes del PDF no sirve: aqui se descomprime
+// cada flujo y se vuelve a armar el texto de cada operador TJ.
+function textosDelPdf(buffer) {
+  const textos = [];
+  const crudo = buffer.toString('latin1');
+  for (const flujo of crudo.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+    let contenido;
+    try {
+      contenido = zlib.inflateSync(Buffer.from(flujo[1], 'latin1')).toString('latin1');
+    } catch (err) {
+      continue; // fuentes u otros flujos que no son contenido de una hoja
+    }
+    for (const tj of contenido.matchAll(/\[([\s\S]*?)\]\s*TJ/g)) {
+      textos.push([...tj[1].matchAll(/<([0-9a-fA-F]+)>/g)].map((h) => Buffer.from(h[1], 'hex').toString('latin1')).join(''));
+    }
+  }
+  return textos;
+}
+
+describe('Encabezado en la primera hoja de cada categoria y numero de hoja', () => {
+  async function descargarPdf(query) {
+    const res = await api(app)
+      .get(`/api/exports/catalog?${query}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  async function crearRegistros(clave, cantidad) {
+    for (let i = 0; i < cantidad; i++) {
+      await Catalog.create({
+        categoria: clave,
+        autor: `Autor ${i}`,
+        titulo: `Titulo ${clave} ${i}`,
+        atributos: { EDITORIAL: 'Ed' },
+        estadoRevision: ESTADOS_REVISION.APROBADO,
+        enviado: true,
+        registradoPor: manager._id,
+      });
+    }
+  }
+
+  test('el titulo del reporte sale una vez por categoria (en su primera hoja), no en las demas hojas de esa categoria', async () => {
+    // Suficientes registros de LIBRO para que ocupen varias hojas.
+    await crearRegistros('LIBRO', 70);
+    await crearRegistros('FOLLETO', 1);
+
+    const pdf = await descargarPdf('');
+    const textos = textosDelPdf(pdf);
+    const hojas = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+
+    expect(hojas).toBeGreaterThanOrEqual(3);
+    expect(textos.filter((t) => t === 'Reporte de catálogo')).toHaveLength(2);
+    expect(textos.filter((t) => t.startsWith('Biblioteca - Facultad'))).toHaveLength(2);
+  });
+
+  test('el numero de hoja ("Hoja N de X") se cuenta por categoria: cada una arranca en "Hoja 1" y X son solo sus hojas', async () => {
+    // LIBRO (orden 1) sale primero y ocupa varias hojas; FOLLETO (orden 3) va despues y ocupa 1.
+    await crearRegistros('LIBRO', 70);
+    await crearRegistros('FOLLETO', 1);
+
+    const pdf = await descargarPdf('');
+    const textos = textosDelPdf(pdf);
+    const hojas = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+    const hojasLibro = hojas - 1;
+
+    expect(hojasLibro).toBeGreaterThanOrEqual(2);
+    for (let n = 1; n <= hojasLibro; n++) {
+      expect(textos.filter((t) => t === `Hoja ${n} de ${hojasLibro}`)).toHaveLength(1);
+    }
+    expect(textos.filter((t) => t === 'Hoja 1 de 1')).toHaveLength(1); // la unica hoja de FOLLETO
+    // Ni una etiqueta de mas: una por hoja, ni mas ni menos.
+    expect(textos.filter((t) => /^Hoja \d+ de \d+$/.test(t))).toHaveLength(hojas);
   });
 });

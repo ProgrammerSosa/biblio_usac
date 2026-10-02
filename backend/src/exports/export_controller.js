@@ -617,38 +617,45 @@ async function exportCatalogPdf(req, res, next) {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivoPdf()}"`);
 
+    // bufferPages: el numero de hoja se escribe al final, cuando ya se sabe cuantas hojas hay.
     const doc = new PDFDocument({
       margin: MARGEN_PAGINA,
       size: TAMANO_PAGINA_OFICIO,
       layout: 'landscape',
+      bufferPages: true,
     });
     doc.pipe(res);
 
-    doc
-      .fillColor('#0f172a')
-      .font('Helvetica-Bold')
-      .fontSize(14)
-      .text('Biblioteca - Facultad de Ciencias Jurídicas y Sociales (USAC)', { align: 'center' });
-    doc.font('Helvetica').fontSize(10).text('Reporte de catálogo', { align: 'center' });
-    doc.moveDown(0.5);
-    doc
-      .fontSize(8)
-      .fillColor('#475569')
-      .text(
-        `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoria || 'todas'}, estado=${
-          estadoRevision === 'DE_BAJA' ? 'De baja' : estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
-        }${rangoAnioRegistro ? `, año de registro=${anioRegistro}` : ''}${
-          buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''
-        }  |  Total: ${registros.length}`
-      );
-    doc.moveDown(0.4);
-    doc.y = dibujarLeyendaColores(doc, doc.page.margins.left, doc.y);
-    doc.moveDown(1);
+    const textoFiltros = `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoria || 'todas'}, estado=${
+      estadoRevision === 'DE_BAJA' ? 'De baja' : estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
+    }${rangoAnioRegistro ? `, año de registro=${anioRegistro}` : ''}${
+      buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''
+    }  |  Total: ${registros.length}`;
+
+    // Titulo del reporte, filtros y leyenda de colores: van en la primera hoja de CADA categoria
+    // (no solo al inicio del PDF), para que al separar el reporte impreso por categoria cada
+    // grupo de hojas arranque con su propio encabezado.
+    function dibujarEncabezadoReporte() {
+      doc
+        .fillColor('#0f172a')
+        .font('Helvetica-Bold')
+        .fontSize(14)
+        .text('Biblioteca - Facultad de Ciencias Jurídicas y Sociales (USAC)', { align: 'center' });
+      doc.font('Helvetica').fontSize(10).text('Reporte de catálogo', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(8).fillColor('#475569').text(textoFiltros);
+      doc.moveDown(0.4);
+      doc.y = dibujarLeyendaColores(doc, doc.page.margins.left, doc.y);
+      doc.moveDown(1);
+    }
 
     // Cada categoria empieza en una hoja nueva (nunca comparte pagina con la anterior, aunque
     // le hubiera quedado espacio) - a pedido del usuario, para poder separar el reporte impreso
     // en un folder por categoria sin tener que cortar ninguna hoja a la mitad.
     let esPrimeraCategoriaDibujada = true;
+    // Primera y ultima hoja (indice en el PDF) de cada categoria, para numerar las hojas de cada
+    // una por separado al final.
+    const hojasPorCategoria = [];
     for (const categoriaDoc of categorias) {
       const filasCategoria = grupos.get(categoriaDoc.clave) || [];
       if (filasCategoria.length === 0) continue;
@@ -658,6 +665,8 @@ async function exportCatalogPdf(req, res, next) {
         doc.addPage();
       }
       esPrimeraCategoriaDibujada = false;
+      const primeraHoja = doc.bufferedPageRange().count - 1;
+      dibujarEncabezadoReporte();
 
       // El ancho de la columna ID se resta aparte porque ya no es una columna mas de
       // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
@@ -671,6 +680,26 @@ async function exportCatalogPdf(req, res, next) {
         tituloCategoria: `${categoriaDoc.nombre} (${filas.length})`,
       });
       doc.moveDown(1);
+      hojasPorCategoria.push({ primera: primeraHoja, ultima: doc.bufferedPageRange().count - 1 });
+    }
+
+    // Numero de hoja arriba a la derecha, dentro del margen superior (no le quita espacio a la
+    // tabla). Se cuenta por categoria: cada una arranca en "Hoja 1 de X", con X = cuantas hojas
+    // ocupa esa categoria (no el total del PDF).
+    for (const { primera, ultima } of hojasPorCategoria) {
+      for (let i = primera; i <= ultima; i++) {
+        doc.switchToPage(i);
+        const anchoUtil = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(11)
+          .fillColor('#0f172a')
+          .text(`Hoja ${i - primera + 1} de ${ultima - primera + 1}`, doc.page.margins.left, 8, {
+            width: anchoUtil,
+            align: 'right',
+            lineBreak: false,
+          });
+      }
     }
 
     doc.end();
