@@ -21,10 +21,10 @@ let auxiliar2Token;
 
 const DIA_PASADO = new Date('2020-01-15T12:00:00.000Z');
 
-function libro(noInventario) {
+function libro(idInventario) {
   return {
     categoria: 'LIBRO',
-    noInventario,
+    idInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
     atributos: { EDITORIAL: 'Ed' },

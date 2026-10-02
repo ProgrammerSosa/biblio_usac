@@ -8,6 +8,9 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
 
   if (err.code === 11000) {
     const campo = Object.keys(err.keyValue || {})[0] || 'campo';
+    if (campo === 'idInventario') {
+      return res.status(409).json({ success: false, error: `Ya existe un registro con el ID ${err.keyValue.idInventario}` });
+    }
     return res.status(409).json({
       success: false,
       error: `Ya existe un registro con ese valor en '${campo}'`,

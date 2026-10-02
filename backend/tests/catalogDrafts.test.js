@@ -44,10 +44,10 @@ afterAll(async () => {
   await closeDatabase();
 });
 
-function libro(noInventario) {
+function libro(idInventario) {
   return {
     categoria: 'LIBRO',
-    noInventario,
+    idInventario,
     autor: 'Autor de Prueba',
     titulo: 'Titulo Borrador de Prueba',
     atributos: { EDITORIAL: 'Ed' },

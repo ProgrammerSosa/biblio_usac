@@ -182,8 +182,9 @@ export default function ImportPage() {
       </div>
       <p className="max-w-2xl text-sm text-slate-500">
         Excel de maximo {LIMITE_MB} MB. Cada hoja debe llamarse como su categoria (ej. Libros, Tesis) y los
-        encabezados van en la fila 1; solo se importan las hojas que coincidan. Una fila = un ejemplar: las filas
-        iguales se agrupan como copias. Antes de guardar revisas lo detectado.
+        encabezados van en la fila 1; solo se importan las hojas que coincidan. Cada fila necesita su ID (columna
+        "ID", ej. 20F, 20F-C1) y no puede repetirse. Una fila = un ejemplar: las filas iguales se agrupan como
+        copias. Antes de guardar revisas lo detectado.
       </p>
 
       <AlertBanner>{error}</AlertBanner>
@@ -352,6 +353,7 @@ export default function ImportPage() {
                       <thead className="sticky top-0 bg-surface text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-3 py-2 font-semibold">Incluir</th>
+                          <th className="px-3 py-2 font-semibold">ID</th>
                           <th className="px-3 py-2 font-semibold">Titulo</th>
                           <th className="px-3 py-2 font-semibold">Autor</th>
                           <th className="px-3 py-2 font-semibold">Copias</th>
@@ -371,6 +373,9 @@ export default function ImportPage() {
                                   onChange={() => toggleIncluir(hoja.categoria, item.fila)}
                                   className="rounded border-border text-primary focus:ring-primary/30"
                                 />
+                              </td>
+                              <td className="max-w-[10rem] truncate px-3 py-2 font-medium" title={(item.ids || []).join(', ')}>
+                                {(item.ids || []).filter(Boolean).join(', ') || 'N/A'}
                               </td>
                               <td className="max-w-xs truncate px-3 py-2" title={item.titulo}>
                                 {item.titulo || 'N/A'}

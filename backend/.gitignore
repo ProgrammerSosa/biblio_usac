@@ -1,3 +1,5 @@
 node_modules/
 .env
 *.log
+# Respaldos que genera scripts/limpiarBaseDeDatos.js antes de borrar: son datos reales.
+respaldos-limpieza/

@@ -6,11 +6,10 @@ const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/con
 const { escapeRegExp } = require('../../helpers/regex');
 const { previsualizarWorkbook } = require('../../helpers/excelImport');
 const { resolverOrden } = require('../../helpers/catalogSort');
-const { siguienteIdInventario } = require('../../helpers/idInventario');
 const { agruparPorCopias } = require('../../helpers/catalogGroup');
 const { ok, created, fail, notFound, forbidden } = require('../../utils/httpResponse');
 
-const CAMPOS_EDITABLES = ['categoria', 'autor', 'titulo', 'idioma', 'anio', 'edicion', 'lugar', 'paginasImpresas', 'estadoFisico', 'atributos'];
+const CAMPOS_EDITABLES = ['idInventario', 'categoria', 'autor', 'titulo', 'idioma', 'anio', 'edicion', 'lugar', 'paginasImpresas', 'estadoFisico', 'atributos'];
 
 function pickCatalogFields(body) {
   const datos = {};
@@ -19,16 +18,14 @@ function pickCatalogFields(body) {
       datos[campo] = body[campo];
     }
   }
-  return datos;
-}
-
-// El ID de inventario ya no se escribe a mano: se asigna solo, en orden, la
-// primera vez que el registro queda Aprobado. Si ya tenia uno (ej. la Manager
-// vuelve a guardar un Aprobado sin cambiar el estado) no se reasigna.
-async function asignarIdInventarioSiHaceFalta(item) {
-  if (item.idInventario === undefined || item.idInventario === null) {
-    item.idInventario = await siguienteIdInventario();
+  // Un ID en blanco no es un ID: se trata como "no vino" (si se guardara '', el indice unico
+  // lo contaria como un valor y el segundo registro en blanco chocaria con el primero).
+  if (datos.idInventario !== undefined) {
+    const id = String(datos.idInventario ?? '').trim();
+    if (id) datos.idInventario = id;
+    else delete datos.idInventario;
   }
+  return datos;
 }
 
 async function createItem(req, res, next) {
@@ -39,6 +36,10 @@ async function createItem(req, res, next) {
       return fail(res, 'La categoria es obligatoria');
     }
     datos.categoria = datos.categoria.toUpperCase().trim();
+
+    if (!datos.idInventario) {
+      return fail(res, 'El ID es obligatorio (ej. 1L, 20F, 20F-C1)');
+    }
 
     if (req.user.rol === ROLES.USER) {
       const usuario = await User.findById(req.user.userId);
@@ -134,13 +135,8 @@ async function listItems(req, res, next) {
     if (buscar && buscar.trim()) {
       const textoBuscado = buscar.trim();
       const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
-      const opciones = [{ titulo: patron }, { autor: patron }];
-      // El ID de inventario es numerico (10001, 10002...); si lo que se busca es un numero
-      // entero, tambien se compara contra ese campo para poder encontrar un ejemplar por su ID.
-      if (/^\d+$/.test(textoBuscado)) {
-        opciones.push({ idInventario: parseInt(textoBuscado, 10) });
-      }
-      clausulas.push({ $or: opciones });
+      // El ID tambien se busca (ej. "20F" encuentra el ejemplar 20F y sus copias 20F-C1, 20F-C2).
+      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { idInventario: patron }] });
     }
     const filtroFinal = { $and: clausulas };
 
@@ -270,7 +266,6 @@ async function revisarMaterial(req, res, next) {
 
     if (decision === 'APROBAR') {
       item.estadoRevision = ESTADOS_REVISION.APROBADO;
-      await asignarIdInventarioSiHaceFalta(item);
     } else {
       if (!observaciones) {
         return fail(res, 'Las observaciones son obligatorias al rechazar un registro');
@@ -314,7 +309,6 @@ async function aprobarLote(req, res, next) {
     for (const item of registros) {
       item.estadoRevision = ESTADOS_REVISION.APROBADO;
       item.revisadoPorAdmin = req.user.userId;
-      await asignarIdInventarioSiHaceFalta(item);
       await item.save();
 
       await registrarAuditoria({
@@ -392,6 +386,24 @@ async function previsualizarImportacion(req, res, next) {
       );
     }
 
+    // Un ID que ya existe en el catalogo (incluidos los registros eliminados, que siguen
+    // ocupando su ID) no se puede volver a importar: se marca la fila para que no se suba por
+    // descuido. Repetidos dentro del mismo Excel ya los detecto previsualizarWorkbook.
+    const idsDelExcel = hojas.flatMap((h) => h.items.flatMap((i) => i.ids || []));
+    if (idsDelExcel.length > 0) {
+      const existentes = await Catalog.find({ idInventario: { $in: idsDelExcel } }, 'idInventario');
+      const idsExistentes = new Set(existentes.map((r) => r.idInventario));
+      hojas.forEach((h) =>
+        h.items.forEach((item) => {
+          const repetidos = (item.ids || []).filter((id) => idsExistentes.has(id));
+          if (repetidos.length > 0) {
+            item.valido = false;
+            item.errores.push(`El ID ${repetidos.join(', ')} ya existe en el catalogo`);
+          }
+        })
+      );
+    }
+
     const totalItems = hojas.reduce((suma, h) => suma + h.items.length, 0);
     const totalValidos = hojas.reduce((suma, h) => suma + h.items.filter((i) => i.valido).length, 0);
 
@@ -425,6 +437,17 @@ async function confirmarImportacion(req, res, next) {
     const categoriasImportadas = new Set();
     const errores = [];
 
+    // Hoja por hoja, en el orden en que llegaron (la vista previa las manda en el orden del archivo).
+    const ordenCategoria = new Map();
+    items.forEach((item) => {
+      if (!ordenCategoria.has(item.categoria)) ordenCategoria.set(item.categoria, ordenCategoria.size);
+    });
+
+    // Un registro por cada fila del Excel. "copias" ya viene sumado desde la vista previa
+    // (helpers/excelImport.js): cuantas filas identicas (mismos datos salvo estado fisico y ID)
+    // se fusionaron en este item. Cada ejemplar trae su propio ID, el de su fila (ej. 20F,
+    // 20F-C1, 20F-C2), en "ids", y su numero de fila en "filas".
+    const pendientes = [];
     for (const item of items) {
       if (categoriasPermitidas && !categoriasPermitidas.includes(item.categoria)) {
         errores.push({
@@ -435,30 +458,45 @@ async function confirmarImportacion(req, res, next) {
         continue;
       }
 
-      // "copias" ya viene sumado desde la vista previa (helpers/excelImport.js): cuantas filas
-      // identicas (mismos datos salvo estado fisico) se fusionaron en este item. El ID de
-      // inventario ya no se lee del Excel - se asigna solo cuando cada copia se apruebe.
       const copias = Math.max(1, parseInt(item.copias, 10) || 1);
       const datos = pickCatalogFields(item);
-
+      const ids = Array.isArray(item.ids) && item.ids.length > 0 ? item.ids : [item.idInventario];
       for (let i = 0; i < copias; i++) {
-        try {
-          // Queda Pendiente (no Aprobado): son datos que vienen de otra fuente y pueden
-          // necesitar correccion, asi que igual pasan por revision antes de darse por buenos.
-          const registro = await Catalog.create({
-            ...datos,
-            registradoPor: req.user.userId,
-            enviado: true,
-            estadoRevision: ESTADOS_REVISION.PENDIENTE,
-            origenImportacion: archivoOrigen ? String(archivoOrigen).trim() : null,
-          });
+        const fila = Array.isArray(item.filas) && item.filas[i] !== undefined ? item.filas[i] : item.fila;
+        pendientes.push({ item, datos, id: ids[i], fila: Number(fila) || 0 });
+      }
+    }
 
-          if (!primerRegistroId) primerRegistroId = registro._id;
-          categoriasImportadas.add(registro.categoria);
-          creados += 1;
-        } catch (err) {
-          errores.push({ categoria: item.categoria, titulo: item.titulo, error: err.message });
-        }
+    // Se crean en el orden de las filas del Excel (no junto a su original: una copia que esta
+    // mas abajo en el archivo se crea mas abajo), porque el orden de creacion es el orden por
+    // defecto de la lista y del reporte - asi todo sale en el orden del Excel que se subio.
+    pendientes.sort((a, b) => ordenCategoria.get(a.item.categoria) - ordenCategoria.get(b.item.categoria) || a.fila - b.fila);
+
+    for (const { item, datos, id } of pendientes) {
+      const idCopia = String(id ?? '').trim();
+      if (!idCopia) {
+        errores.push({ categoria: item.categoria, titulo: item.titulo, error: 'Falta el ID' });
+        continue;
+      }
+
+      try {
+        // Queda Pendiente (no Aprobado): son datos que vienen de otra fuente y pueden
+        // necesitar correccion, asi que igual pasan por revision antes de darse por buenos.
+        const registro = await Catalog.create({
+          ...datos,
+          idInventario: idCopia,
+          registradoPor: req.user.userId,
+          enviado: true,
+          estadoRevision: ESTADOS_REVISION.PENDIENTE,
+          origenImportacion: archivoOrigen ? String(archivoOrigen).trim() : null,
+        });
+
+        if (!primerRegistroId) primerRegistroId = registro._id;
+        categoriasImportadas.add(registro.categoria);
+        creados += 1;
+      } catch (err) {
+        const mensaje = err.code === 11000 ? `El ID ${idCopia} ya existe en el catalogo` : err.message;
+        errores.push({ categoria: item.categoria, titulo: item.titulo, error: mensaje });
       }
     }
 

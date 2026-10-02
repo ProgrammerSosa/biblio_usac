@@ -8,6 +8,8 @@
     "dev": "nodemon server.js",
     "seed": "node scripts/seed.js",
     "agregar-categorias-nuevas": "node scripts/agregarCategoriasNuevas.js",
+    "quitar-ids-automaticos": "node scripts/quitarIdsAutomaticos.js",
+    "limpiar-base": "node scripts/limpiarBaseDeDatos.js",
     "test": "jest --runInBand"
   },
   "dependencies": {

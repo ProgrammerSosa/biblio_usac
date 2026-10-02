@@ -196,7 +196,7 @@ describe('El catalogo usa las categorias dinamicas', () => {
       .set('Authorization', `Bearer ${managerToken}`)
       .send({
         categoria: nueva.body.data.clave,
-        noInventario: 'T-001',
+        idInventario: 'T-001',
         autor: 'Autor de Prueba',
         titulo: 'Tesis de Prueba',
         atributos: { ASESOR: 'Lic. Prueba' },
@@ -215,7 +215,7 @@ describe('El catalogo usa las categorias dinamicas', () => {
     const res = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ categoria: 'ACTAS', noInventario: 'T-002', autor: 'Autor', titulo: 'Titulo' });
+      .send({ categoria: 'ACTAS', idInventario: 'T-002', autor: 'Autor', titulo: 'Titulo' });
 
     expect(res.status).toBe(400);
   });
@@ -224,7 +224,7 @@ describe('El catalogo usa las categorias dinamicas', () => {
     const res = await api(app)
       .post('/api/catalog')
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ categoria: 'NO_EXISTE', noInventario: 'T-003', autor: 'Autor', titulo: 'Titulo' });
+      .send({ categoria: 'NO_EXISTE', idInventario: 'T-003', autor: 'Autor', titulo: 'Titulo' });
 
     expect(res.status).toBe(400);
   });
@@ -235,7 +235,7 @@ describe('El catalogo usa las categorias dinamicas', () => {
       .set('Authorization', `Bearer ${managerToken}`)
       .send({
         categoria: 'DICCIONARIO',
-        noInventario: 'T-004',
+        idInventario: 'T-004',
         autor: 'Autor',
         titulo: 'Titulo',
         atributos: { EDITORIAL: 'Ed', campoInventado: 'x' },

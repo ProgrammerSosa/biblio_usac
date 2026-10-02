@@ -12,6 +12,7 @@ import AlertBanner from '../../shared/components/AlertBanner';
 
 const CAMPOS_COMUNES_INICIALES = {
   categoria: '',
+  idInventario: '',
   autor: '',
   titulo: '',
   idioma: '',
@@ -52,6 +53,7 @@ export default function CatalogFormPage() {
         const item = res.data.data;
         setForm({
           categoria: item.categoria || '',
+          idInventario: item.idInventario || '',
           autor: item.autor || '',
           titulo: item.titulo || '',
           idioma: item.idioma || '',
@@ -149,6 +151,14 @@ export default function CatalogFormPage() {
               </option>
             ))}
           </Select>
+
+          <Input
+            label="ID"
+            required
+            placeholder="Ej. 1L, 20F, 20F-C1"
+            value={form.idInventario}
+            onChange={(e) => handleChange('idInventario', e.target.value)}
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <Input label="Autor" required value={form.autor} onChange={(e) => handleChange('autor', e.target.value)} />

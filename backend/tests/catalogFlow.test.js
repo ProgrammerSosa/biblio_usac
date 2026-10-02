@@ -52,10 +52,15 @@ afterAll(async () => {
   await closeDatabase();
 });
 
-function libroValido(noInventario) {
+// El ID ya no se genera solo: cada registro necesita el suyo, escrito a mano. Si la prueba no
+// pasa uno, se inventa uno distinto cada vez para que nunca choquen entre si.
+let contadorIds = 0;
+const nuevoId = () => `ID-AUTO-${++contadorIds}`;
+
+function libroValido(idInventario) {
   return {
     categoria: 'LIBRO',
-    noInventario,
+    idInventario: idInventario ?? nuevoId(),
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
     idioma: 'Español',
@@ -70,10 +75,10 @@ function libroValido(noInventario) {
   };
 }
 
-function revistaValida(noInventario) {
+function revistaValida(idInventario) {
   return {
     categoria: 'REVISTA',
-    noInventario,
+    idInventario: idInventario ?? nuevoId(),
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
     idioma: 'Español',
@@ -89,10 +94,10 @@ function revistaValida(noInventario) {
   };
 }
 
-function diccionarioValido(noInventario) {
+function diccionarioValido(idInventario) {
   return {
     categoria: 'DICCIONARIO',
-    noInventario,
+    idInventario: idInventario ?? nuevoId(),
     autor: 'Autor de Prueba',
     titulo: 'Titulo de Prueba',
     idioma: 'Español',
@@ -331,7 +336,6 @@ describe('Rechazo en lote (solo Admin/Manager)', () => {
       const item = await api(app).get(`/api/catalog/${id}`).set('Authorization', `Bearer ${adminToken}`);
       expect(item.body.data.estadoRevision).toBe(ESTADOS_REVISION.RECHAZADO);
       expect(item.body.data.observaciones).toBe('Faltan datos en los tres');
-      expect(item.body.data.idInventario).toBeUndefined();
     }
   });
 
@@ -366,13 +370,14 @@ describe('Copias detectadas automaticamente al registrar (sin ninguna accion ext
     // No existe ningun endpoint para "agregar copias": si ya hay 5 ejemplares en el catalogo
     // y se registran 3 mas con exactamente los mismos datos (solo cambia estado fisico), los
     // 3 se crean sin problema, cada uno como su propio documento Pendiente - la vista de
-    // Catalogo (CatalogListPage) los agrupa solos por coincidir en todo salvo estado fisico.
+    // Catalogo (CatalogListPage) los agrupa solos por coincidir en todo salvo estado fisico y ID
+    // (cada ejemplar lleva el suyo).
     const datosBase = { ...libroValido(), titulo: 'Libro En Stock Multiple' };
     for (let i = 0; i < 5; i++) {
       const res = await api(app)
         .post('/api/catalog')
         .set('Authorization', `Bearer ${userToken}`)
-        .send({ ...datosBase, estadoFisico: `Ejemplar ${i + 1}` });
+        .send({ ...datosBase, idInventario: `MULTI-${i + 1}`, estadoFisico: `Ejemplar ${i + 1}` });
       expect(res.status).toBe(201);
     }
 
@@ -380,7 +385,7 @@ describe('Copias detectadas automaticamente al registrar (sin ninguna accion ext
       const res = await api(app)
         .post('/api/catalog')
         .set('Authorization', `Bearer ${userToken}`)
-        .send({ ...datosBase, estadoFisico: `Ejemplar nuevo ${i + 1}` });
+        .send({ ...datosBase, idInventario: `MULTI-NUEVO-${i + 1}`, estadoFisico: `Ejemplar nuevo ${i + 1}` });
       expect(res.status).toBe(201);
     }
 
@@ -520,16 +525,51 @@ describe('Dar de baja (distinto de eliminar - el registro se queda visible)', ()
   });
 });
 
-describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
-  test('un registro recien creado no tiene ID de inventario todavia', async () => {
-    const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(libroValido());
+describe('ID del registro (lo escribe la biblioteca, ya no se genera solo)', () => {
+  const crearConId = (idInventario, extra = {}) =>
+    api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send({ ...libroValido(idInventario), ...extra });
+
+  test('sin ID no se puede registrar un material', async () => {
+    const datos = libroValido();
+    delete datos.idInventario;
+
+    const res = await api(app).post('/api/catalog').set('Authorization', `Bearer ${userToken}`).send(datos);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('ID');
+  });
+
+  test('un ID en blanco tampoco cuenta como ID', async () => {
+    const res = await crearConId('   ');
+    expect(res.status).toBe(400);
+  });
+
+  test('el ID se guarda en mayusculas y con los espacios normalizados', async () => {
+    const res = await crearConId(' 20-f   c1 ');
 
     expect(res.status).toBe(201);
-    expect(res.body.data.idInventario).toBeUndefined();
+    expect(res.body.data.idInventario).toBe('20-F C1');
   });
 
-  test('al aprobar un registro se le asigna el primer ID disponible (10001)', async () => {
-    const creado = await crearYEnviar(userToken, libroValido());
+  test('dos registros no pueden tener el mismo ID, aunque cambien las mayusculas o los espacios', async () => {
+    const primero = await crearConId('20F');
+    const repetido = await crearConId(' 20f ', { titulo: 'Otro titulo' });
+
+    expect(primero.status).toBe(201);
+    expect(repetido.status).toBe(409);
+    expect(repetido.body.error).toContain('20F');
+  });
+
+  test('cada ejemplar lleva su propio ID: el original y sus copias (20F, 20F-C1, 20F-C2) conviven sin chocar', async () => {
+    for (const id of ['20F', '20F-C1', '20F-C2']) {
+      const res = await crearConId(id, { titulo: 'Mismo libro' });
+      expect(res.status).toBe(201);
+    }
+    expect(await Catalog.countDocuments({ titulo: 'Mismo libro' })).toBe(3);
+  });
+
+  test('aprobar un registro NO cambia ni asigna ID: conserva el que se escribio', async () => {
+    const creado = await crearYEnviar(userToken, libroValido('5L'));
 
     const res = await api(app)
       .patch(`/api/catalog/${creado.body.data._id}/revisar`)
@@ -537,41 +577,12 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .send({ decision: 'APROBAR' });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.idInventario).toBe(10001);
+    expect(res.body.data.idInventario).toBe('5L');
   });
 
-  test('cada aprobacion siguiente recibe el proximo numero, en orden', async () => {
-    const uno = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Primero' });
-    const dos = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Segundo' });
-
-    const resUno = await api(app)
-      .patch(`/api/catalog/${uno.body.data._id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
-    const resDos = await api(app)
-      .patch(`/api/catalog/${dos.body.data._id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
-
-    expect(resUno.body.data.idInventario).toBe(10001);
-    expect(resDos.body.data.idInventario).toBe(10002);
-  });
-
-  test('rechazar un registro NO le asigna ID de inventario', async () => {
-    const creado = await crearYEnviar(userToken, libroValido());
-
-    const res = await api(app)
-      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'RECHAZAR', observaciones: 'Falta corregir el autor' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.idInventario).toBeUndefined();
-  });
-
-  test('aprobar en lote tambien asigna un ID a cada registro', async () => {
-    const uno = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Lote uno' });
-    const dos = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Lote dos' });
+  test('aprobar en lote conserva el ID de cada registro', async () => {
+    const uno = await crearYEnviar(userToken, { ...libroValido('LOTE-A'), titulo: 'Lote uno' });
+    const dos = await crearYEnviar(userToken, { ...libroValido('LOTE-B'), titulo: 'Lote dos' });
 
     const res = await api(app)
       .patch('/api/catalog/aprobar-lote')
@@ -579,39 +590,37 @@ describe('ID de inventario automatico (se asigna solo al aprobar)', () => {
       .send({ ids: [uno.body.data._id, dos.body.data._id] });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.aprobados).toBe(2);
-
     const registros = await Catalog.find({ _id: { $in: [uno.body.data._id, dos.body.data._id] } });
-    expect(registros.map((r) => r.idInventario).sort()).toEqual([10001, 10002]);
+    expect(registros.map((r) => r.idInventario).sort()).toEqual(['LOTE-A', 'LOTE-B']);
   });
 
-  test('si la Manager vuelve a guardar un registro ya Aprobado, no le reasigna otro ID', async () => {
-    const creado = await crearYEnviar(userToken, libroValido());
-    await api(app)
-      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
+  test('se puede corregir el ID de un registro, pero no dejarlo igual al de otro', async () => {
+    const uno = await crearConId('9L');
+    await crearConId('10L');
 
-    const editado = await api(app)
-      .patch(`/api/catalog/${creado.body.data._id}`)
+    const corregido = await api(app)
+      .patch(`/api/catalog/${uno.body.data._id}`)
       .set('Authorization', `Bearer ${managerToken}`)
-      .send({ autor: 'Autor Corregido' });
+      .send({ idInventario: '9L-BIS' });
+    expect(corregido.status).toBe(200);
+    expect(corregido.body.data.idInventario).toBe('9L-BIS');
 
-    expect(editado.status).toBe(200);
-    expect(editado.body.data.idInventario).toBe(10001);
+    const repetido = await api(app)
+      .patch(`/api/catalog/${uno.body.data._id}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ idInventario: '10L' });
+    expect(repetido.status).toBe(409);
   });
 
-  test('se puede buscar un registro aprobado por su ID de inventario', async () => {
-    const creado = await crearYEnviar(userToken, { ...libroValido(), titulo: 'Buscable por ID' });
-    await api(app)
-      .patch(`/api/catalog/${creado.body.data._id}/revisar`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ decision: 'APROBAR' });
+  test('se puede buscar por ID, tambien una parte: "20F" encuentra el ejemplar 20F y su copia 20F-C1', async () => {
+    await crearYEnviar(userToken, { ...libroValido('20F'), titulo: 'Libro Con Copia' });
+    await crearYEnviar(userToken, { ...libroValido('20F-C1'), titulo: 'Libro Con Copia' });
+    await crearYEnviar(userToken, { ...libroValido('7L'), titulo: 'Otro Libro' });
 
-    const res = await api(app).get('/api/catalog?buscar=10001').set('Authorization', `Bearer ${adminToken}`);
+    const res = await api(app).get('/api/catalog?buscar=20f').set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.registros.map((r) => r.titulo)).toContain('Buscable por ID');
+    expect(res.body.data.registros.map((r) => r.idInventario).sort()).toEqual(['20F', '20F-C1']);
   });
 });
 
@@ -753,6 +762,18 @@ describe('Ordenamiento del catalogo (parametro sort)', () => {
     // "banco de datos" (minuscula) por orden de codigo Unicode, no alfabetico real.
     expect(indice('Ábaco antiguo')).toBeLessThan(indice('banco de datos'));
     expect(indice('banco de datos')).toBeLessThan(indice('Cielo abierto'));
+  });
+
+  test('por defecto los registros salen en el orden en que se ingresaron (el primero primero); sort=fecha_desc lo invierte', async () => {
+    for (const [id, titulo] of [['O-1', 'Zeta'], ['O-2', 'Alfa'], ['O-3', 'Mu']]) {
+      await crearYEnviar(adminToken, { ...libroValido(id), titulo });
+    }
+
+    const porDefecto = await api(app).get('/api/catalog?limit=50').set('Authorization', `Bearer ${adminToken}`);
+    expect(porDefecto.body.data.registros.map((r) => r.idInventario)).toEqual(['O-1', 'O-2', 'O-3']);
+
+    const masRecientes = await api(app).get('/api/catalog?sort=fecha_desc&limit=50').set('Authorization', `Bearer ${adminToken}`);
+    expect(masRecientes.body.data.registros.map((r) => r.idInventario)).toEqual(['O-3', 'O-2', 'O-1']);
   });
 
   test('sort=anio_asc ordena del anio mas antiguo al mas nuevo', async () => {

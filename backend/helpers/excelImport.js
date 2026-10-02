@@ -52,6 +52,14 @@ const CAMPOS_COMUNES = {
   pags: 'paginasImpresas',
   pag: 'paginasImpresas',
   'estado fisico': 'estadoFisico',
+  // El ID del registro lo escriben ellos en el Excel (ej. 20F, 20F-C1) - ya no se genera solo.
+  id: 'idInventario',
+  'id inventario': 'idInventario',
+  'id de inventario': 'idInventario',
+  'no. de inventario': 'idInventario',
+  'no de inventario': 'idInventario',
+  'no. inventario': 'idInventario',
+  'numero de inventario': 'idInventario',
 };
 
 // Respaldo para categorias SIN un atributo propio de notas: si el Excel trae una columna
@@ -63,14 +71,12 @@ const CAMPOS_NOTAS = ['notas', 'nota'];
 
 // Columnas que existen en los Excel reales de la biblioteca pero no son un dato del material:
 // se ignoran sin avisar (no tiene sentido pedir que se "creen como atributo de categoria").
-// El No. de Inventario tampoco se lee mas: ahora se asigna solo al aprobar (ver
-// helpers/idInventario.js), asi que esa columna del Excel se ignora igual que "No." (que
-// siempre fue solo el numero de fila/renglon del Excel, nunca un dato a guardar). "Copias"
-// tambien se ignora a proposito: declarar una cantidad a mano genera confusion (¿es el total
-// o lo adicional?) - las copias se detectan solas agrupando filas con los mismos datos (ver
-// claveDeGrupo/agruparPorCopias mas abajo), asi que basta con pegar una fila por ejemplar
-// fisico, igual que antes.
-const CAMPOS_IGNORADOS = ['no.', 'no', '#', 'no. de inventario', 'no de inventario', 'copias', 'copia'];
+// "No." es solo el numero de fila/renglon del Excel, nunca un dato a guardar (el ID del
+// registro va en su propia columna, ver CAMPOS_COMUNES). "Copias" tambien se ignora a proposito:
+// declarar una cantidad a mano genera confusion (¿es el total o lo adicional?) - las copias se
+// detectan solas agrupando filas con los mismos datos (ver claveDeGrupo/agruparPorCopias mas
+// abajo), asi que basta con pegar una fila por ejemplar fisico, cada una con su propio ID.
+const CAMPOS_IGNORADOS = ['no.', 'no', '#', 'copias', 'copia'];
 
 // Alias para columnas que son "campos propios de categoria" pero cuyo encabezado en Excel
 // no coincide letra por letra con la clave guardada en Category (ej. "Volúmen " -> VOLUMEN).
@@ -115,9 +121,9 @@ function filaVacia(datos) {
 
 // Misma regla que la vista de catalogo (CatalogListPage): dos filas son "el mismo material"
 // si TODO coincide 100% (normalizado - sin acentos, mayusculas ni espacios de mas) excepto
-// el estado fisico y el No. de Inventario - los dos unicos datos que de verdad cambian entre
-// copias fisicas del mismo libro. Ya no se declara un numero de copias a mano: si varias
-// filas del Excel cumplen esto, se cuentan solas como copias del mismo registro.
+// el estado fisico y el ID - los dos unicos datos que de verdad cambian entre copias fisicas
+// del mismo libro. Ya no se declara un numero de copias a mano: si varias filas del Excel
+// cumplen esto, se cuentan solas como copias del mismo registro (cada una con su propio ID).
 function claveDeGrupo(datos) {
   const camposBase = [datos.categoria, datos.autor, datos.titulo, datos.idioma, datos.anio, datos.edicion, datos.lugar, datos.paginasImpresas];
   const atributos = datos.atributos || {};
@@ -146,6 +152,9 @@ function agruparPorCopias(items) {
     return {
       ...base,
       filas: grupo.map((i) => i.fila),
+      // El ID de cada ejemplar, en el mismo orden que "filas": al confirmar, la copia N se crea
+      // con el ID de su propia fila.
+      ids: grupo.map((i) => i.idInventario),
       copias,
       errores,
       valido: errores.length === 0,
@@ -187,6 +196,9 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
 
   const resultado = [];
   const hojasOmitidas = [];
+  // ID -> donde aparecio primero, para avisar si el mismo ID se repite en otra fila (o en otra
+  // hoja) del mismo Excel. El ID tiene que ser unico en todo el catalogo.
+  const idsVistos = new Map();
 
   for (const worksheet of workbook.worksheets) {
     // Una hoja vacia o con solo encabezado (plantilla sin llenar) no es nada que avisar.
@@ -232,6 +244,7 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
 
       const datos = {
         categoria: claveCategoria,
+        idInventario: '',
         autor: '',
         titulo: '',
         idioma: '',
@@ -286,14 +299,23 @@ async function previsualizarWorkbook(buffer, categoriasPorClave) {
       }
       datos.autor = String(datos.autor || '').trim();
       datos.titulo = String(datos.titulo || '').trim();
+      datos.idInventario = String(datos.idInventario ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
 
-      // Autor y titulo son lo unico que de verdad bloquea la fila (sin eso el registro no
-      // significa nada). Los campos propios de la categoria que falten (ISBN, Editorial, etc.)
-      // no descartan la fila: se llenan con "N/A" y se marcan en camposFaltantes para que la
-      // vista previa los resalte en rojo - el que revise despues completa el dato real.
+      // Autor, titulo y el ID son lo unico que de verdad bloquea la fila (sin eso el registro no
+      // significa nada o no se puede identificar). Los campos propios de la categoria que falten
+      // (ISBN, Editorial, etc.) no descartan la fila: se llenan con "N/A" y se marcan en
+      // camposFaltantes para que la vista previa los resalte en rojo - el que revise despues
+      // completa el dato real.
       const errores = [];
       if (!datos.autor) errores.push('Falta el autor');
       if (!datos.titulo) errores.push('Falta el titulo');
+      if (!datos.idInventario) {
+        errores.push('Falta el ID');
+      } else if (idsVistos.has(datos.idInventario)) {
+        errores.push(`ID repetido en el Excel (ya aparece en ${idsVistos.get(datos.idInventario)})`);
+      } else {
+        idsVistos.set(datos.idInventario, `la fila ${numeroFila} de "${worksheet.name.trim()}"`);
+      }
 
       const camposFaltantes = [];
       for (const campo of categoria.campos) {

@@ -2,8 +2,6 @@ const mongoose = require('mongoose');
 const ExcelJS = require('exceljs');
 const Catalog = require('../catalog/catalog_model');
 const Category = require('../catalog/category_model');
-const Counter = require('../catalog/counter_model');
-const { CONTADOR_ID } = require('../../helpers/idInventario');
 const { normalizarTexto } = require('../../helpers/catalogGroup');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA } = require('../../utils/constants');
@@ -262,8 +260,6 @@ async function restaurarRespaldo(req, res, next) {
       }
     }
 
-    let idInventarioMasAlto = 0;
-
     // Una hoja por categoria (el nombre de la hoja es la clave) - "Categorias" es la unica
     // que no es una hoja de catalogo.
     for (const hoja of workbook.worksheets) {
@@ -276,10 +272,7 @@ async function restaurarRespaldo(req, res, next) {
       for (const datos of leerFilasConEncabezados(hoja)) {
         if (!datos.titulo && !datos.autor) continue;
         try {
-          const idInventario = datos.idInventario !== '' && datos.idInventario !== undefined ? Number(datos.idInventario) : undefined;
-          if (Number.isFinite(idInventario) && idInventario > idInventarioMasAlto) {
-            idInventarioMasAlto = idInventario;
-          }
+          const idInventario = datos.idInventario !== '' && datos.idInventario !== undefined ? String(datos.idInventario).trim() : undefined;
 
           // Cualquier columna que no sea una de las fijas es un atributo propio de esta
           // categoria (Editorial, ISBN, Tomos...) - se reconstruye comparando su encabezado
@@ -293,7 +286,7 @@ async function restaurarRespaldo(req, res, next) {
 
           const campos = {
             categoria: claveCategoria,
-            idInventario: Number.isFinite(idInventario) ? idInventario : undefined,
+            idInventario: idInventario || undefined,
             autor: datos.autor || '',
             titulo: datos.titulo || '',
             idioma: datos.idioma || '',
@@ -329,15 +322,6 @@ async function restaurarRespaldo(req, res, next) {
         } catch (err) {
           resultado.errores.push({ titulo: datos.titulo || 'Sin titulo', error: err.message });
         }
-      }
-    }
-
-    // El contador de ID de inventario no puede quedar por debajo de lo que ya se restauro,
-    // o la siguiente aprobacion asignaria un ID que ya existe (choca con el indice unico).
-    if (idInventarioMasAlto > 0) {
-      const actual = await Counter.findById(CONTADOR_ID);
-      if (!actual || actual.seq < idInventarioMasAlto) {
-        await Counter.findByIdAndUpdate(CONTADOR_ID, { seq: idInventarioMasAlto }, { upsert: true });
       }
     }
 

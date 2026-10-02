@@ -92,11 +92,23 @@ function calcularColoresPorRegistro(registros) {
   return colores;
 }
 
+// El ID ya no es un numero corto (10001): ahora es texto como "20-F C1" o "SHL-12". ANCHO_ID es
+// el minimo; la columna se ensancha hasta el ID mas largo del reporte (con un tope, para que un
+// ID desmedido no se coma la tabla - si lo pasa, hace salto de linea en su celda).
 const ANCHO_ID = 40;
-const COLUMNA_ID = (coloresPorRegistro) => ({
+const ANCHO_MAX_ID = 100;
+const PADDING_ID = 14;
+
+function anchoColumnaId(doc, registros) {
+  doc.font('Helvetica-Bold').fontSize(11);
+  const mayor = registros.reduce((max, r) => Math.max(max, doc.widthOfString(String(r.idInventario ?? 'N/A'))), 0);
+  return Math.min(ANCHO_MAX_ID, Math.max(ANCHO_ID, Math.ceil(mayor) + PADDING_ID));
+}
+
+const COLUMNA_ID = (coloresPorRegistro, width = ANCHO_ID) => ({
   key: 'idInventario',
   header: 'ID',
-  width: ANCHO_ID,
+  width,
   fontSize: 11,
   negrita: true,
   bgColorFn: (row) => (coloresPorRegistro.get(String(row._id)) || COLOR_EJEMPLAR_A).fondo,
@@ -239,7 +251,12 @@ const ORDEN_TIPO_DOCUMENTO = {
   revista: 2,
   folleto: 3,
   'publicaciones institucionales': 4,
+  // Asi lo escriben en los Excel reales (en singular) - es el mismo tipo.
+  'publicacion institucional': 4,
 };
+
+const NOMBRE_TIPO_CONOCIDO = { 1: 'Libro', 2: 'Revista', 3: 'Folleto', 4: 'Publicaciones Institucionales' };
+const NOMBRE_SIN_TIPO = 'Sin tipo de documento';
 
 function esCampoTipoDocumento(campo) {
   return normalizarTexto(campo.etiqueta) === 'tipo de documento';
@@ -261,6 +278,38 @@ function ordenarFilasPorTipoDocumentoSiAplica(categoriaDoc, filas) {
     return ORDEN_TIPO_DOCUMENTO[valor] ?? Number.MAX_SAFE_INTEGER;
   };
   return [...filas].sort((a, b) => rangoDe(a) - rangoDe(b));
+}
+
+// Con el mismo check activo, cada tipo de documento va en su PROPIA tabla y cada tabla arranca en
+// una hoja nueva (ver exportCatalogPdf): los libros en sus hojas, las revistas aparte, etc.
+// Devuelve [{ tipo, filas }] en el orden Libro, Revista, Folleto, Publicaciones Institucionales;
+// despues cualquier otro tipo que aparezca (alfabetico) y al final las filas sin tipo. Si la
+// categoria no aplica (sin el check, o sin el campo) devuelve null y el reporte sale como
+// siempre, en una sola tabla. Las filas de cada grupo conservan el orden con el que llegaron.
+function agruparFilasPorTipoDocumentoSiAplica(categoriaDoc, filas) {
+  if (!categoriaDoc.ordenarPorTipoDocumento) return null;
+  const campoTipoDocumento = (categoriaDoc.campos || []).find(esCampoTipoDocumento);
+  if (!campoTipoDocumento) return null;
+
+  const grupos = new Map();
+  for (const fila of filas) {
+    const valor = String((fila.atributos && fila.atributos[campoTipoDocumento.clave]) || '').trim();
+    const normalizado = normalizarTexto(valor);
+    const rangoConocido = ORDEN_TIPO_DOCUMENTO[normalizado];
+    const clave = rangoConocido ? `conocido:${rangoConocido}` : normalizado ? `otro:${normalizado}` : 'sin-tipo';
+    if (!grupos.has(clave)) {
+      grupos.set(clave, {
+        tipo: rangoConocido ? NOMBRE_TIPO_CONOCIDO[rangoConocido] : valor || NOMBRE_SIN_TIPO,
+        rango: rangoConocido ?? (normalizado ? 100 : 101),
+        filas: [],
+      });
+    }
+    grupos.get(clave).filas.push(fila);
+  }
+
+  return [...grupos.values()]
+    .sort((a, b) => a.rango - b.rango || a.tipo.localeCompare(b.tipo, 'es'))
+    .map(({ tipo, filas: filasDelTipo }) => ({ tipo, filas: filasDelTipo }));
 }
 
 const colorSiDanado = (row) => (tieneDanoFisico(row.estadoFisico) ? DANGER_TEXT : null);
@@ -585,11 +634,7 @@ async function exportCatalogPdf(req, res, next) {
     if (buscar && buscar.trim()) {
       const textoBuscado = buscar.trim();
       const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
-      const opciones = [{ titulo: patron }, { autor: patron }];
-      if (/^\d+$/.test(textoBuscado)) {
-        opciones.push({ idInventario: parseInt(textoBuscado, 10) });
-      }
-      clausulas.push({ $or: opciones });
+      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { idInventario: patron }] });
     }
     const filtroFinal = { $and: clausulas };
 
@@ -652,6 +697,10 @@ async function exportCatalogPdf(req, res, next) {
     // Cada categoria empieza en una hoja nueva (nunca comparte pagina con la anterior, aunque
     // le hubiera quedado espacio) - a pedido del usuario, para poder separar el reporte impreso
     // en un folder por categoria sin tener que cortar ninguna hoja a la mitad.
+    // Mismo ancho de la columna ID en todo el reporte (el del ID mas largo), para que no cambie de
+    // una categoria a otra.
+    const anchoId = anchoColumnaId(doc, registros);
+
     let esPrimeraCategoriaDibujada = true;
     // Primera y ultima hoja (indice en el PDF) de cada categoria, para numerar las hojas de cada
     // una por separado al final.
@@ -659,7 +708,14 @@ async function exportCatalogPdf(req, res, next) {
     for (const categoriaDoc of categorias) {
       const filasCategoria = grupos.get(categoriaDoc.clave) || [];
       if (filasCategoria.length === 0) continue;
-      const filas = ordenarFilasPorTipoDocumentoSiAplica(categoriaDoc, filasCategoria);
+
+      // Con el check de "Ordenar las FILAS por Tipo de documento": una tabla por tipo (libros,
+      // revistas, folletos...), cada una en hoja nueva. Sin el check: una sola tabla con todas
+      // las filas, como siempre.
+      const porTipo = agruparFilasPorTipoDocumentoSiAplica(categoriaDoc, filasCategoria);
+      const secciones = porTipo
+        ? porTipo.map(({ tipo, filas }) => ({ titulo: `${categoriaDoc.nombre} - ${tipo} (${filas.length})`, filas }))
+        : [{ titulo: `${categoriaDoc.nombre} (${filasCategoria.length})`, filas: filasCategoria }];
 
       if (!esPrimeraCategoriaDibujada) {
         doc.addPage();
@@ -668,18 +724,22 @@ async function exportCatalogPdf(req, res, next) {
       const primeraHoja = doc.bufferedPageRange().count - 1;
       dibujarEncabezadoReporte();
 
-      // El ancho de la columna ID se resta aparte porque ya no es una columna mas de
-      // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
-      const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right - ANCHO_ID;
-      const gruposColumnas = construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas);
-      drawTable(doc, {
-        x: doc.page.margins.left,
-        columnGroups: gruposColumnas,
-        rows: filas,
-        idColumn: COLUMNA_ID(coloresPorRegistro),
-        tituloCategoria: `${categoriaDoc.nombre} (${filas.length})`,
+      secciones.forEach((seccion, indice) => {
+        if (indice > 0) doc.addPage();
+
+        // El ancho de la columna ID se resta aparte porque ya no es una columna mas de
+        // construirGruposColumnas - se dibuja aparte, a la izquierda de todo (ver idColumn).
+        const anchoDisponible = doc.page.width - doc.page.margins.left - doc.page.margins.right - anchoId;
+        const gruposColumnas = construirGruposColumnas(doc, categoriaDoc, anchoDisponible, seccion.filas);
+        drawTable(doc, {
+          x: doc.page.margins.left,
+          columnGroups: gruposColumnas,
+          rows: seccion.filas,
+          idColumn: COLUMNA_ID(coloresPorRegistro, anchoId),
+          tituloCategoria: seccion.titulo,
+        });
+        doc.moveDown(1);
       });
-      doc.moveDown(1);
       hojasPorCategoria.push({ primera: primeraHoja, ultima: doc.bufferedPageRange().count - 1 });
     }
 
@@ -713,6 +773,7 @@ module.exports = {
   construirGruposColumnas,
   categoriasOrdenadasParaReporte,
   ordenarFilasPorTipoDocumentoSiAplica,
+  agruparFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
   comprimirAnchos,
   calcularColoresPorRegistro,

@@ -17,6 +17,7 @@ const {
   construirGruposColumnas,
   categoriasOrdenadasParaReporte,
   ordenarFilasPorTipoDocumentoSiAplica,
+  agruparFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
   comprimirAnchos,
   calcularColoresPorRegistro,
@@ -899,6 +900,36 @@ describe('ordenarFilasPorTipoDocumentoSiAplica (categorias "variante" con sello,
 
     expect(resultado).toEqual([libroMayusculas, revistaConEspacios]);
   });
+
+  test('agruparFilasPorTipoDocumentoSiAplica: una tabla por tipo (Libro, Revista, Folleto, Publicaciones); luego otros tipos en orden alfabetico y al final las filas sin tipo', () => {
+    const libro1 = fila('Libro');
+    const libro2 = fila('libro ');
+    const revista = fila('Revista');
+    const folleto = fila('Folleto');
+    // Los Excel reales lo escriben en singular, y es el mismo tipo que el plural.
+    const publicacionSingular = fila('Publicacion Institucional ');
+    const publicacionPlural = fila('Publicaciones Institucionales');
+    const boletin = fila('Boletín');
+    const acta = fila('Acta');
+    const sinTipo = { atributos: {} };
+
+    const grupos = agruparFilasPorTipoDocumentoSiAplica(categoriaConCheck, [
+      boletin, revista, sinTipo, libro1, publicacionSingular, acta, folleto, libro2, publicacionPlural,
+    ]);
+
+    expect(grupos.map((g) => g.tipo)).toEqual([
+      'Libro', 'Revista', 'Folleto', 'Publicaciones Institucionales', 'Acta', 'Boletín', 'Sin tipo de documento',
+    ]);
+    expect(grupos[0].filas).toEqual([libro1, libro2]);
+    expect(grupos[3].filas).toEqual([publicacionSingular, publicacionPlural]);
+    expect(grupos[6].filas).toEqual([sinTipo]);
+  });
+
+  test('agruparFilasPorTipoDocumentoSiAplica: devuelve null (una sola tabla, como siempre) sin el check o sin el campo "Tipo de documento"', () => {
+    const filas = [fila('Libro'), fila('Revista')];
+    expect(agruparFilasPorTipoDocumentoSiAplica({ ...categoriaConCheck, ordenarPorTipoDocumento: false }, filas)).toBeNull();
+    expect(agruparFilasPorTipoDocumentoSiAplica({ ordenarPorTipoDocumento: true, campos: [] }, filas)).toBeNull();
+  });
 });
 
 // pdfkit comprime el contenido de cada hoja y parte el texto en varios trozos hexadecimales
@@ -962,6 +993,82 @@ describe('Encabezado en la primera hoja de cada categoria y numero de hoja', () 
     expect(hojas).toBeGreaterThanOrEqual(3);
     expect(textos.filter((t) => t === 'Reporte de catálogo')).toHaveLength(2);
     expect(textos.filter((t) => t.startsWith('Biblioteca - Facultad'))).toHaveLength(2);
+  });
+
+  test('con el check de "Tipo de documento", cada tipo va en su propia tabla y en una hoja nueva (libros aparte, revistas aparte...)', async () => {
+    const crear = async (tipo, cantidad) => {
+      for (let i = 0; i < cantidad; i++) {
+        await Catalog.create({
+          categoria: 'DOCS_DE_DONACION',
+          autor: `Autor ${tipo} ${i}`,
+          titulo: `Titulo ${tipo} ${i}`,
+          atributos: { EDITORIAL: 'Ed', TIPO_DE_DOCUMENTO: tipo },
+          estadoRevision: ESTADOS_REVISION.APROBADO,
+          enviado: true,
+          registradoPor: manager._id,
+        });
+      }
+    };
+    // Se crean en desorden a proposito: el reporte tiene que ordenarlos Libro, Revista, Folleto.
+    await crear('Revista', 2);
+    await crear('Folleto', 1);
+    await crear('Libro', 3);
+
+    const pdf = await descargarPdf('categoria=DOCS_DE_DONACION');
+    const textos = textosDelPdf(pdf);
+    const hojas = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+
+    expect(hojas).toBe(3);
+    const posicion = (titulo) => textos.indexOf(titulo);
+    expect(posicion('Docs de Donacion - Libro (3)')).toBeGreaterThanOrEqual(0);
+    expect(posicion('Docs de Donacion - Revista (2)')).toBeGreaterThan(posicion('Docs de Donacion - Libro (3)'));
+    expect(posicion('Docs de Donacion - Folleto (1)')).toBeGreaterThan(posicion('Docs de Donacion - Revista (2)'));
+    // La categoria entera cuenta como una sola: sus 3 hojas se numeran 1 de 3, 2 de 3, 3 de 3.
+    [1, 2, 3].forEach((n) => expect(textos).toContain(`Hoja ${n} de 3`));
+  });
+
+  test('la columna ID se ensancha para que un ID de texto largo (ej. "SHL-123-C2") salga completo, sin partirse en dos lineas', async () => {
+    for (const idInventario of ['20-F C1', 'SHL-123-C2']) {
+      await Catalog.create({
+        categoria: 'LIBRO',
+        idInventario,
+        autor: `Autor ${idInventario}`,
+        titulo: `Titulo ${idInventario}`,
+        atributos: { EDITORIAL: 'Ed' },
+        estadoRevision: ESTADOS_REVISION.APROBADO,
+        enviado: true,
+        registradoPor: manager._id,
+      });
+    }
+
+    const pdf = await descargarPdf('');
+    const textos = textosDelPdf(pdf);
+
+    // Si la celda hubiera partido el ID en dos lineas, el texto saldria en dos trozos
+    // distintos y esta comparacion exacta no lo encontraria.
+    expect(textos).toContain('20-F C1');
+    expect(textos).toContain('SHL-123-C2');
+  });
+
+  test('por defecto el reporte lista los registros en el orden en que se ingresaron (como el Excel), no los mas recientes primero', async () => {
+    for (const idInventario of ['ORD-1', 'ORD-2', 'ORD-3', 'ORD-4']) {
+      await Catalog.create({
+        categoria: 'LIBRO',
+        idInventario,
+        autor: `Autor ${idInventario}`,
+        titulo: `Titulo ${idInventario}`,
+        atributos: { EDITORIAL: 'Ed' },
+        estadoRevision: ESTADOS_REVISION.APROBADO,
+        enviado: true,
+        registradoPor: manager._id,
+      });
+    }
+
+    const textos = textosDelPdf(await descargarPdf(''));
+    const posiciones = ['ORD-1', 'ORD-2', 'ORD-3', 'ORD-4'].map((id) => textos.indexOf(id));
+
+    expect(posiciones.every((p) => p >= 0)).toBe(true);
+    expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
   });
 
   test('el numero de hoja ("Hoja N de X") se cuenta por categoria: cada una arranca en "Hoja 1" y X son solo sus hojas', async () => {

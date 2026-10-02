@@ -10,12 +10,15 @@ const catalogSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
-    // Ya no se escribe a mano: se asigna solo, en orden (10001, 10002, 10003...), la primera
-    // vez que el registro queda Aprobado (ver helpers/idInventario.js) - un registro que
-    // sigue Pendiente o fue Rechazado todavia no tiene. "sparse" permite que todos esos
-    // queden sin valor a la vez, sin romper la unicidad entre los que si ya lo tienen.
+    // ID del registro, escrito por quien lo ingresa (en el Excel o en el formulario), con el
+    // tipo segun el criterio de la biblioteca: "1L" (libro), "1F" (folleto), "20-F C1" (copia 1
+    // del ejemplar 20-F), "SHL-3" (sello humanidades libro)... Es texto libre: el sistema no
+    // valida la letra, solo que no se repita. Ya no se genera solo. Se guarda en mayusculas y con
+    // los espacios normalizados, para que "20-f  c1" y "20-F C1" cuenten como el mismo ID. "sparse"
+    // deja que los registros sin ID convivan sin chocar entre si.
     idInventario: {
-      type: Number,
+      type: String,
+      set: (valor) => (valor === undefined || valor === null ? valor : String(valor).replace(/\s+/g, ' ').trim().toUpperCase()),
       unique: true,
       sparse: true,
     },

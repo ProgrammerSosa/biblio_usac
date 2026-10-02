@@ -68,13 +68,14 @@ export const ACCION_TONOS = {
 };
 
 // Mismos 8 valores que resuelve el backend (helpers/catalogSort.js) - un valor
-// desconocido o vacio cae al orden por defecto (fecha_desc), asi que el select
-// siempre puede arrancar en 'fecha_desc' sin mandar nada especial.
-export const ORDEN_POR_DEFECTO = 'fecha_desc';
+// desconocido o vacio cae al orden por defecto (fecha_asc), asi que el select
+// siempre puede arrancar en 'fecha_asc' sin mandar nada especial. Ese orden es el de ingreso:
+// al importar un Excel, el mismo orden de sus filas.
+export const ORDEN_POR_DEFECTO = 'fecha_asc';
 
 export const OPCIONES_ORDEN_CATALOGO = [
-  { value: 'fecha_desc', label: 'Fecha de registro (mas reciente)' },
-  { value: 'fecha_asc', label: 'Fecha de registro (mas antiguo)' },
+  { value: 'fecha_asc', label: 'Orden de ingreso (como el Excel)' },
+  { value: 'fecha_desc', label: 'Mas recientes primero' },
   { value: 'titulo_asc', label: 'Titulo (A-Z)' },
   { value: 'titulo_desc', label: 'Titulo (Z-A)' },
   { value: 'autor_asc', label: 'Autor (A-Z)' },

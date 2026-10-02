@@ -13,7 +13,11 @@ const OPCIONES_ORDEN = {
   anio_asc: { campo: 'anio', direccion: 1 },
 };
 
-const ORDEN_POR_DEFECTO = 'fecha_desc';
+// Por defecto los registros salen en el orden en que se ingresaron (el mas antiguo primero): al
+// importar un Excel, eso es exactamente el orden de sus filas, que es como los quiere ver la
+// biblioteca (lista, aprobaciones y reporte PDF). "fecha_desc" sigue disponible para quien
+// prefiera ver lo mas reciente primero.
+const ORDEN_POR_DEFECTO = 'fecha_asc';
 
 // Mongo ordena texto por punto de codigo Unicode (mayusculas antes que
 // minusculas, acentos fuera de orden). Con esta collation, "Título"/"autor"
@@ -28,8 +32,10 @@ const COLLATION_ES = { locale: 'es', strength: 1 };
  */
 function resolverOrden(sortParam) {
   const opcion = OPCIONES_ORDEN[sortParam] || OPCIONES_ORDEN[ORDEN_POR_DEFECTO];
+  // El _id desempata (dos registros creados en el mismo milisegundo, o con el mismo titulo): los
+  // _id de un mismo lote salen en el orden en que se crearon, asi el orden nunca queda al azar.
   return {
-    sort: { [opcion.campo]: opcion.direccion },
+    sort: { [opcion.campo]: opcion.direccion, _id: opcion.campo === 'createdAt' ? opcion.direccion : 1 },
     collation: CAMPOS_CON_COLLATION.has(opcion.campo) ? COLLATION_ES : null,
   };
 }

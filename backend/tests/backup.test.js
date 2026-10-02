@@ -8,11 +8,9 @@ const app = require('../server');
 const User = require('../src/users/user_model');
 const Catalog = require('../src/catalog/catalog_model');
 const Category = require('../src/catalog/category_model');
-const Counter = require('../src/catalog/counter_model');
 const { hashPassword } = require('../helpers/password');
 const { generateJWT } = require('../helpers/tokens');
 const { ROLES, ESTADOS_REVISION } = require('../utils/constants');
-const { CONTADOR_ID } = require('../helpers/idInventario');
 
 let manager;
 let admin;
@@ -75,7 +73,7 @@ describe('GET /api/backup/exportar', () => {
   test('el Excel de respaldo trae las hojas Categorias y Catalogo con los datos reales', async () => {
     await Catalog.create({
       categoria: 'LIBRO',
-      idInventario: 10001,
+      idInventario: '1L',
       autor: 'Autor De Respaldo',
       titulo: 'Libro De Respaldo',
       atributos: { EDITORIAL: 'Editorial X' },
@@ -140,7 +138,7 @@ describe('POST /api/backup/restaurar', () => {
   test('exportar y luego restaurar el mismo respaldo reproduce exactamente el catalogo (ida y vuelta)', async () => {
     const original = await Catalog.create({
       categoria: 'LIBRO',
-      idInventario: 10005,
+      idInventario: '5L',
       autor: 'Autor Ida Y Vuelta',
       titulo: 'Libro Ida Y Vuelta',
       idioma: 'Español',
@@ -177,14 +175,14 @@ describe('POST /api/backup/restaurar', () => {
     expect(restaurado).not.toBeNull();
     expect(restaurado.titulo).toBe('Libro Ida Y Vuelta');
     expect(restaurado.autor).toBe('Autor Ida Y Vuelta');
-    expect(restaurado.idInventario).toBe(10005);
+    expect(restaurado.idInventario).toBe('5L');
     expect(restaurado.atributos.EDITORIAL).toBe('Editorial Z');
     expect(restaurado.estadoRevision).toBe(ESTADOS_REVISION.APROBADO);
     expect(String(restaurado.registradoPor)).toBe(String(manager._id));
     expect(String(restaurado.revisadoPorAdmin)).toBe(String(admin._id));
   });
 
-  test('restaurar un ID de inventario mas alto que el contador actual empuja el contador hacia adelante (no choca con la siguiente aprobacion)', async () => {
+  test('restaurar un respaldo conserva un ID escrito a mano (texto como 20F-C1)', async () => {
     const workbook = new ExcelJS.Workbook();
     const hojaCategorias = workbook.addWorksheet('Categorias');
     hojaCategorias.addRow(['clave', 'nombre', 'campos', 'camposComunesDesactivados', 'activo']);
@@ -199,7 +197,7 @@ describe('POST /api/backup/restaurar', () => {
       'origenImportacion', 'revisadoPorAdmin', 'revisadoPorAdminEmail', 'eliminado', 'createdAt', 'updatedAt',
     ]);
     hojaLibro.addRow([
-      '', 99999, 'Autor Contador', 'Libro Contador', 'Español', '2020', '1ra', 'Guatemala', 100,
+      '', '20F-C1', 'Autor Texto', 'Libro Con ID Texto', 'Español', '2020', '1ra', 'Guatemala', 100,
       'Buen estado', 'APROBADO', '', true, String(manager._id), '', '', '', '', false, '', '',
     ]);
     const buffer = await workbook.xlsx.writeBuffer();
@@ -212,7 +210,7 @@ describe('POST /api/backup/restaurar', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.catalogoCreados).toBe(1);
 
-    const contador = await Counter.findById(CONTADOR_ID);
-    expect(contador.seq).toBeGreaterThanOrEqual(99999);
+    const restaurado = await Catalog.findOne({ titulo: 'Libro Con ID Texto' });
+    expect(restaurado.idInventario).toBe('20F-C1');
   });
 });
