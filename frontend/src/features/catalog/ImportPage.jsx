@@ -46,6 +46,12 @@ export default function ImportPage() {
   const [confirmando, setConfirmando] = useState(false);
   const [error, setError] = useState('');
   const [resultado, setResultado] = useState(null);
+  // Opcion para no dejar importar mientras haya registros con error (activada por defecto) - la
+  // persona tiene que decidir que hacer con ellos: cambiar el Excel, aceptar dejarlos fuera o
+  // eliminarlos de la lista.
+  const [bloquearConErrores, setBloquearConErrores] = useState(true);
+  const [aceptoErrores, setAceptoErrores] = useState(false);
+  const [eliminadosPorError, setEliminadosPorError] = useState([]);
 
   function elegirArchivo(lista) {
     const nuevo = lista?.[0];
@@ -77,6 +83,8 @@ export default function ImportPage() {
     setAnalizando(true);
     setError('');
     setResultado(null);
+    setAceptoErrores(false);
+    setEliminadosPorError([]);
     try {
       const res = await catalogApi.importarPrevisualizar(archivo);
       const nuevaSeleccion = {};
@@ -127,9 +135,39 @@ export default function ImportPage() {
     });
   }
 
+  // Saca de la lista los registros con error (los que no se pueden importar tal como vienen). Se
+  // guardan aparte para que el resumen final igual diga cuales fueron y por que.
+  function eliminarRegistrosConError() {
+    const eliminados = [];
+    const restantes = hojas
+      .map((hoja) => ({
+        ...hoja,
+        items: hoja.items.filter((item) => {
+          if (item.valido) return true;
+          eliminados.push({
+            categoria: hoja.categoria,
+            fila: item.fila,
+            titulo: item.titulo,
+            motivo: `Eliminado de la lista por tener error: ${item.errores.join(', ')}`,
+          });
+          return false;
+        }),
+      }))
+      .filter((hoja) => hoja.items.length > 0);
+    setEliminadosPorError((prev) => [...prev, ...eliminados]);
+    setHojas(restantes);
+  }
+
+  function cambiarElExcel() {
+    setHojas(null);
+    setArchivo(null);
+  }
+
   async function handleConfirmar() {
+    if (bloqueado) return;
+
     const items = [];
-    const noImportados = [];
+    const noImportados = [...eliminadosPorError];
     hojas.forEach((hoja) => {
       hoja.items.forEach((item) => {
         const estado = seleccion[claveItem(hoja.categoria, item.fila)];
@@ -166,6 +204,8 @@ export default function ImportPage() {
   }
 
   const totalSeleccionados = Object.values(seleccion).filter((s) => s.incluir).length;
+  const registrosConError = (hojas || []).flatMap((hoja) => hoja.items.filter((item) => !item.valido));
+  const bloqueado = bloquearConErrores && registrosConError.length > 0 && !aceptoErrores;
 
   return (
     <div className="flex flex-col gap-4">
@@ -217,7 +257,7 @@ export default function ImportPage() {
           {resultado.noImportados?.length > 0 ? (
             <div className="mt-4">
               <p className="mb-2 text-sm font-medium text-secondary">
-                {resultado.noImportados.length} material(es) no se importaron (los dejaste sin marcar):
+                {resultado.noImportados.length} material(es) no se importaron:
               </p>
               <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto text-xs text-slate-600">
                 {resultado.noImportados.map((n) => (
@@ -306,10 +346,69 @@ export default function ImportPage() {
               <Button variant="ghost" onClick={() => setHojas(null)}>
                 Cancelar
               </Button>
-              <Button onClick={handleConfirmar} disabled={confirmando || totalSeleccionados === 0}>
+              <Button
+                onClick={handleConfirmar}
+                disabled={confirmando || totalSeleccionados === 0 || bloqueado}
+                title={bloqueado ? 'Primero decide que hacer con los registros con error' : undefined}
+              >
                 {confirmando ? 'Importando...' : `Confirmar importacion (${totalSeleccionados})`}
               </Button>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-white px-4 py-2.5">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={bloquearConErrores}
+                onChange={(e) => {
+                  setBloquearConErrores(e.target.checked);
+                  setAceptoErrores(false);
+                }}
+                className="rounded border-border text-primary focus:ring-primary/30"
+              />
+              No permitir importar si hay registros con error
+            </label>
+
+            {bloqueado ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                <p>
+                  <strong>
+                    {registrosConError.length} registro(s) tienen error, asi que no se puede importar todavia. Elige que hacer:
+                  </strong>
+                </p>
+                <ul className="mt-1 list-disc pl-5 text-xs">
+                  <li>
+                    <strong>Cambiar:</strong> corrige el Excel y vuelve a subirlo.
+                  </li>
+                  <li>
+                    <strong>Aceptar:</strong> se importan solo los registros sin error y los demas quedan fuera.
+                  </li>
+                  <li>
+                    <strong>Eliminar:</strong> se quitan de la lista los registros con error y se importan los que si se pueden agregar.
+                  </li>
+                </ul>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={cambiarElExcel}>
+                    Cambiar el Excel
+                  </Button>
+                  <Button variant="secondary" onClick={() => setAceptoErrores(true)}>
+                    Aceptar: importar solo los correctos
+                  </Button>
+                  <Button variant="danger" onClick={eliminarRegistrosConError}>
+                    Eliminar los {registrosConError.length} con error de la lista
+                  </Button>
+                </div>
+              </div>
+            ) : aceptoErrores && registrosConError.length > 0 ? (
+              <p className="text-xs text-amber-700">
+                Aceptaste dejar {registrosConError.length} registro(s) con error fuera de la importacion (saldran en el resumen
+                final).{' '}
+                <button type="button" onClick={() => setAceptoErrores(false)} className="underline">
+                  Deshacer
+                </button>
+              </p>
+            ) : null}
           </div>
 
           {hojasOmitidas.length > 0 ? (
@@ -370,6 +469,8 @@ export default function ImportPage() {
                                 <input
                                   type="checkbox"
                                   checked={estado.incluir}
+                                  disabled={!item.valido}
+                                  title={!item.valido ? 'Tiene un error: no se puede importar tal como viene' : undefined}
                                   onChange={() => toggleIncluir(hoja.categoria, item.fila)}
                                   className="rounded border-border text-primary focus:ring-primary/30"
                                 />
