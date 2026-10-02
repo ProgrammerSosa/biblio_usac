@@ -401,6 +401,38 @@ function repartirSobrante(lote, sobranteInicial) {
   }
 }
 
+// Minimo al que se puede comprimir cada columna cuando los anchos ideales no caben en una sola
+// fila (ver comprimirAnchos). Titulo/Autor/Estado fisico son las unicas columnas garantizadas que
+// se comprimen (las comunes, como Idioma o Año, ya son angostas); cualquier atributo de
+// categoria baja hasta ANCHO_MIN_ATRIBUTO.
+const MINIMO_AL_COMPRIMIR = { titulo: 80, autor: 60, estadoFisico: ANCHO_MIN_ATRIBUTO };
+const minimoAlComprimir = (columna) => MINIMO_AL_COMPRIMIR[columna.key] ?? ANCHO_MIN_ATRIBUTO;
+
+// Le quita "excedente" puntos de ancho a las columnas dadas, empezando por las mas anchas (un
+// mismo tope baja de a poco hasta que lo recortado alcanza), sin dejar ninguna por debajo de su
+// minimo. Devuelve false SIN tocar nada si ni con todas al minimo se llega - en ese caso el
+// llamador tiene que usar la fila de continuacion en vez de apretar las columnas hasta que el
+// texto sea ilegible.
+function comprimirAnchos(columnas, excedente) {
+  const holgura = columnas.reduce((suma, c) => suma + Math.max(0, c.width - minimoAlComprimir(c)), 0);
+  if (excedente > holgura) return false;
+
+  const anchoTotal = sumaAnchos(columnas);
+  let bajo = 0;
+  let alto = Math.max(...columnas.map((c) => c.width));
+  for (let i = 0; i < 40; i++) {
+    const tope = (bajo + alto) / 2;
+    const comprimido = columnas.reduce((suma, c) => suma + Math.max(minimoAlComprimir(c), Math.min(c.width, tope)), 0);
+    if (anchoTotal - comprimido > excedente) bajo = tope;
+    else alto = tope;
+  }
+
+  columnas.forEach((c) => {
+    c.width = Math.max(minimoAlComprimir(c), Math.min(c.width, alto));
+  });
+  return true;
+}
+
 // Arma una tabla principal (columnas garantizadas + tantos atributos como quepan en el
 // ancho de la hoja) y, si sobran, una o mas tablas de continuacion debajo, cada una con su
 // propio lote de columnas hasta agotarlos todos. Cada columna de atributo ya trae su ancho
@@ -439,6 +471,23 @@ function construirGruposColumnas(doc, categoriaDoc, anchoDisponible, filas) {
     COLUMNA_ANIO_REGISTRO(),
   ];
   const columnasOverflow = construirColumnasAtributos(doc, otrosCampos, filas);
+
+  // Un registro = una fila (pedido del cliente). Si con los anchos ideales no caben todas las
+  // columnas, en vez de mandar atributos a una fila de continuacion se comprimen las mas anchas
+  // (el texto hace salto de linea dentro de su celda y la fila crece en alto, pero sigue siendo
+  // una sola fila). La continuacion de mas abajo queda solo para cuando ni al minimo caben.
+  const excedente = sumaAnchos(columnasGarantizadas) + sumaAnchos(columnasNotasFinal) + sumaAnchos(columnasOverflow) - anchoDisponible;
+  if (excedente > 0) {
+    const atributosPorAncho = [...columnasOverflow].sort((a, b) => a.width - b.width);
+    const comprimibles = [
+      ...columnasGarantizadas.filter((c) => c.key in MINIMO_AL_COMPRIMIR),
+      ...columnasOverflow,
+      ...columnasNotasFinal,
+    ];
+    if (comprimirAnchos(comprimibles, excedente)) {
+      return [[...columnasGarantizadas, ...atributosPorAncho, ...columnasNotasFinal]];
+    }
+  }
 
   if (columnasOverflow.length === 0) {
     // Sin atributos que reparar en una fila de continuacion, "Notas" (si la categoria la
@@ -636,6 +685,7 @@ module.exports = {
   categoriasOrdenadasParaReporte,
   ordenarFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
+  comprimirAnchos,
   calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,
   ANCHO_MAX_ATRIBUTO,

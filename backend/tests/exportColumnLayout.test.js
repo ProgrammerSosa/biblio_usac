@@ -17,6 +17,7 @@ const {
   categoriasOrdenadasParaReporte,
   ordenarFilasPorTipoDocumentoSiAplica,
   repartirSobrante,
+  comprimirAnchos,
   calcularColoresPorRegistro,
   ANCHO_MIN_ATRIBUTO,
   ANCHO_MAX_ATRIBUTO,
@@ -236,20 +237,19 @@ describe('El reparto de columnas del PDF funciona igual para cualquier categoria
   });
 
   test('reordena por ancho para aprovechar al maximo la fila principal, sin importar en que orden se definieron los campos', async () => {
-    // Un campo ancho definido PRIMERO en Gestion de Categorias, seguido de 3 angostos. Antes
+    // Un campo ancho definido PRIMERO en Gestion de Categorias, seguido de muchos angostos. Antes
     // (empaquetado en el orden de los campos) el ancho se probaba primero, se quedaba solo con
-    // el espacio y los 3 angostos se iban de una a la continuacion - 1 sola columna extra en la
-    // fila principal. Ordenando por ancho (angostas primero), las 3 angostas SI caben juntas en
-    // la fila principal y es el ancho el que se va solo a la continuacion - 3 columnas extra en
-    // vez de 1, que es justo lo que se busca: aprovechar al maximo la primera fila.
+    // el espacio y los angostos se iban de una a la continuacion. Ordenando por ancho (angostas
+    // primero), las angostas SI caben juntas en la fila principal y es el ancho el que se va solo
+    // a la continuacion - justo lo que se busca: aprovechar al maximo la primera fila.
+    // Son muchos campos a proposito: con pocos, todo se comprime en UNA sola fila (ver el test de
+    // "una fila por registro" mas abajo) y la continuacion nunca llega a hacer falta.
     const categoriaDoc = await Category.create({
       clave: 'PRUEBA_ORDEN_ANCHO',
       nombre: 'Prueba orden ancho',
       campos: [
         { clave: 'ANCHO', etiqueta: 'Campo Ancho', requerido: false },
-        { clave: 'A', etiqueta: 'Campo A', requerido: false },
-        { clave: 'B', etiqueta: 'Campo B', requerido: false },
-        { clave: 'C', etiqueta: 'Campo C', requerido: false },
+        ...'ABCDEFGHIJKL'.split('').map((letra) => ({ clave: letra, etiqueta: `Campo ${letra}`, requerido: false })),
       ],
     });
 
@@ -266,9 +266,7 @@ describe('El reparto de columnas del PDF funciona igual para cualquier categoria
       atributos: {
         // Bien largo, para que quede pegado al tope maximo (ANCHO_MAX_ATRIBUTO).
         ANCHO: 'Un valor excepcionalmente largo que ocupa mucho espacio y deberia ceder su turno a los campos angostos',
-        A: 'x',
-        B: 'x',
-        C: 'x',
+        ...Object.fromEntries('ABCDEFGHIJKL'.split('').map((letra) => [letra, 'x'])),
       },
       estadoRevision: ESTADOS_REVISION.APROBADO,
       enviado: true,
@@ -287,6 +285,63 @@ describe('El reparto de columnas del PDF funciona igual para cualquier categoria
 
     const encabezadosResto = grupos.slice(1).flat().map((c) => c.header);
     expect(encabezadosResto).toContain('Campo Ancho');
+  });
+
+  test('una fila por registro: un registro real con Editorial larguisima cabe en la fila principal (se comprimen columnas, no se manda Editorial a una fila de continuacion)', async () => {
+    const categoriaDoc = await Category.findOne({ clave: 'DOCS_SELLO_FACUJURI_Y_SOCI' });
+    const registro = await Catalog.create({
+      categoria: categoriaDoc.clave,
+      autor: 'Secretaria general del consejo nacional de planificacion economica, Direccion de Planificacion global, Departamento de Poblacion y empleo.',
+      titulo: 'Migracion interna y distribucion geografica de la poblacion',
+      idioma: 'Español',
+      anio: '1986',
+      lugar: 'Guatemala',
+      paginasImpresas: 243,
+      estadoFisico: 'Buen estado',
+      atributos: {
+        EDITORIAL: 'Secretaria general del consejo nacional de planificacion economica',
+        TIPO_DE_DOCUMENTO: 'Publicacion Institucional',
+        NOTAS: 'Es una serie de resultados No.13',
+      },
+      estadoRevision: ESTADOS_REVISION.APROBADO,
+      enviado: true,
+      registradoPor: manager._id,
+    });
+
+    const doc = nuevoDoc();
+    const anchoDisponible = anchoDisponibleOficio();
+    const grupos = construirGruposColumnas(doc, categoriaDoc, anchoDisponible, [registro]);
+
+    expect(grupos).toHaveLength(1);
+    verificarGruposValidos(grupos, anchoDisponible);
+    const encabezados = grupos[0].map((c) => c.header);
+    expect(encabezados).toEqual(expect.arrayContaining(['Editorial', 'Tipo de Documento', 'Notas']));
+  });
+
+  test('comprimirAnchos: recorta primero las columnas mas anchas, respeta el minimo de cada una y no toca nada si ni al minimo alcanza', () => {
+    const columna = (key, width) => ({ key, width });
+    const ancha = columna('atributos.A', 220);
+    const media = columna('atributos.B', 100);
+    const angosta = columna('atributos.C', ANCHO_MIN_ATRIBUTO);
+
+    // Hay que quitar 80pt: sale todo de la mas ancha (220 -> 140); las otras ni se tocan.
+    expect(comprimirAnchos([ancha, media, angosta], 80)).toBe(true);
+    expect(ancha.width).toBeCloseTo(140, 0);
+    expect(media.width).toBe(100);
+    expect(angosta.width).toBe(ANCHO_MIN_ATRIBUTO);
+
+    // Imposible: aun con todas al minimo (70 c/u) solo se pueden quitar (140-70)+(100-70)=100pt.
+    const [a2, b2] = [columna('atributos.A', 140), columna('atributos.B', 100)];
+    expect(comprimirAnchos([a2, b2], 500)).toBe(false);
+    expect(a2.width).toBe(140);
+    expect(b2.width).toBe(100);
+
+    // Ninguna baja de su minimo aunque se pida recortar casi todo lo posible.
+    const [a3, b3] = [columna('atributos.A', 140), columna('atributos.B', 100)];
+    expect(comprimirAnchos([a3, b3], 99)).toBe(true);
+    expect(a3.width).toBeGreaterThanOrEqual(ANCHO_MIN_ATRIBUTO - 0.01);
+    expect(b3.width).toBeGreaterThanOrEqual(ANCHO_MIN_ATRIBUTO - 0.01);
+    expect(a3.width + b3.width).toBeLessThanOrEqual(240 - 99 + 0.01);
   });
 
   test('Estado fisico con texto viejo excepcionalmente largo nunca pasa de su propio tope (la mitad del maximo normal), en cualquier categoria', async () => {
