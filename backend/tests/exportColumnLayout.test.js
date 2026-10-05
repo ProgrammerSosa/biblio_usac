@@ -1071,6 +1071,32 @@ describe('Encabezado en la primera hoja de cada categoria y numero de hoja', () 
     expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
   });
 
+  test('una copia ingresada al final sale junto a su original (con su propio ID), no al final de la categoria', async () => {
+    const material = (idInventario, titulo, extra = {}) =>
+      Catalog.create({
+        categoria: 'LIBRO',
+        idInventario,
+        autor: 'Autor Fijo',
+        titulo,
+        atributos: { EDITORIAL: 'Ed' },
+        estadoRevision: ESTADOS_REVISION.APROBADO,
+        enviado: true,
+        registradoPor: manager._id,
+        ...extra,
+      });
+    // Orden de ingreso: 20F, 21F, 22F y, de ultimo, una copia de 20F (mismos datos, otro ID y otro estado fisico).
+    await material('20F', 'Titulo Alfa', { estadoFisico: 'Buen estado' });
+    await material('21F', 'Titulo Beta');
+    await material('22F', 'Titulo Gamma');
+    await material('20F-C1', 'Titulo Alfa', { estadoFisico: 'Pasta rota' });
+
+    const textos = textosDelPdf(await descargarPdf(''));
+    const posiciones = ['20F', '20F-C1', '21F', '22F'].map((id) => textos.indexOf(id));
+
+    expect(posiciones.every((p) => p >= 0)).toBe(true);
+    expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
+  });
+
   test('el numero de hoja ("Hoja N de X") se cuenta por categoria: cada una arranca en "Hoja 1" y X son solo sus hojas', async () => {
     // LIBRO (orden 1) sale primero y ocupa varias hojas; FOLLETO (orden 3) va despues y ocupa 1.
     await crearRegistros('LIBRO', 70);

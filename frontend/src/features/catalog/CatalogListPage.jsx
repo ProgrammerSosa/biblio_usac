@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers, Send, FileSpreadsheet, Archive } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertTriangle, FileDown, Search, Layers, Send, FileSpreadsheet, Archive, X } from 'lucide-react';
 import { catalogApi } from './catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
 import { useCategories } from '../../shared/hooks/useCategories';
-import { ESTADOS_REVISION, ESTADO_REVISION_LABELS, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
+import { ESTADOS_REVISION, ESTADO_REVISION_LABELS, ROLES, tieneDanoFisico } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import EstadoRevisionBadge from '../../shared/components/EstadoRevisionBadge';
 import Badge from '../../shared/components/Badge';
@@ -13,8 +13,10 @@ import Button from '../../shared/components/Button';
 import Pagination from '../../shared/components/Pagination';
 import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
-import { Select, Textarea } from '../../shared/components/FormField';
+import { Textarea } from '../../shared/components/FormField';
 import CatalogDetailFields from './CatalogDetailFields';
+import FiltrosCatalogo from './FiltrosCatalogo';
+import { filtrosIniciales, parametrosDeFiltros, placeholderBusqueda, resumenDeFiltros } from './catalogFiltros';
 import { agruparRegistros } from '../../shared/utils/catalogGrouping';
 
 const TONO_ESTADO = { PENDIENTE: 'neutral', APROBADO: 'success', RECHAZADO: 'danger' };
@@ -51,6 +53,22 @@ function nombreArchivoPdf() {
   const fecha = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())}`;
   const hora = `${pad(ahora.getHours())}-${pad(ahora.getMinutes())}-${pad(ahora.getSeconds())}`;
   return `catalogo-biblioteca-${fecha}_${hora}.pdf`;
+}
+
+// El PDF se pide como "blob": si el servidor contesta con un error (ej. "No hay registros que
+// coincidan con los filtros indicados"), el JSON llega dentro de ese blob y hay que leerlo para
+// poder mostrar el mensaje real en vez de uno generico.
+async function mensajeDeErrorPdf(err) {
+  const cuerpo = err?.response?.data;
+  if (cuerpo instanceof Blob) {
+    try {
+      const mensaje = JSON.parse(await cuerpo.text())?.error;
+      if (mensaje) return mensaje;
+    } catch {
+      // El cuerpo no era JSON: se usa el mensaje generico.
+    }
+  }
+  return getErrorMessage(err, 'No se pudo generar el PDF');
 }
 
 function EstadoOBorrador({ item }) {
@@ -191,14 +209,12 @@ export default function CatalogListPage() {
   const { categorias, etiquetaDe } = useCategories();
   const [registros, setRegistros] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(null);
   const [page, setPage] = useState(1);
-  const [categoria, setCategoria] = useState('');
-  const [estadoRevision, setEstadoRevision] = useState('');
-  const [anioRegistro, setAnioRegistro] = useState('');
-  const [sort, setSort] = useState(ORDEN_POR_DEFECTO);
+  // Todo lo que se marca en el panel de filtros (ver catalogFiltros.js), mas el texto de la barra.
+  const [filtros, setFiltros] = useState(() => filtrosIniciales({ soloMios: user?.rol === ROLES.USER }));
   const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
-  const [soloMios, setSoloMios] = useState(user?.rol === ROLES.USER);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [itemAEliminar, setItemAEliminar] = useState(null);
@@ -217,15 +233,11 @@ export default function CatalogListPage() {
     setLoading(true);
     setError('');
     try {
-      const params = { page, limit: 15, sort };
-      if (categoria) params.categoria = categoria;
-      if (estadoRevision) params.estadoRevision = estadoRevision;
-      if (anioRegistro) params.anioRegistro = anioRegistro;
-      if (soloMios) params.registradoPor = user?.id;
-      if (buscar.trim()) params.buscar = buscar.trim();
+      const params = { page, limit: 15, ...parametrosDeFiltros(filtros, { buscar, userId: user?.id }) };
       const res = await catalogApi.list(params);
       setRegistros(res.data.data.registros);
       setTotalPages(res.data.data.totalPages);
+      setTotal(res.data.data.total);
     } catch (err) {
       setError(getErrorMessage(err, 'No se pudo cargar el catalogo'));
     } finally {
@@ -245,7 +257,18 @@ export default function CatalogListPage() {
     cargar();
     setSeleccionados(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, categoria, estadoRevision, anioRegistro, soloMios, buscar, sort]);
+  }, [page, filtros, buscar]);
+
+  // Cambiar cualquier filtro vuelve a la primera pagina del listado.
+  function cambiarFiltros(cambios) {
+    setPage(1);
+    setFiltros((actuales) => ({ ...actuales, ...cambios }));
+  }
+
+  function limpiarFiltros() {
+    setPage(1);
+    setFiltros(filtrosIniciales());
+  }
 
   async function confirmarEliminar() {
     if (!itemAEliminar) return;
@@ -338,13 +361,7 @@ export default function CatalogListPage() {
     setExportando(true);
     setError('');
     try {
-      const params = { sort };
-      if (categoria) params.categoria = categoria;
-      if (estadoRevision) params.estadoRevision = estadoRevision;
-      if (anioRegistro) params.anioRegistro = anioRegistro;
-      if (soloMios) params.registradoPor = user?.id;
-      if (buscar.trim()) params.buscar = buscar.trim();
-      const res = await catalogApi.exportPdf(params);
+      const res = await catalogApi.exportPdf(parametrosDeFiltros(filtros, { buscar, userId: user?.id }));
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
@@ -354,7 +371,7 @@ export default function CatalogListPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      setError(getErrorMessage(err, 'No se pudo generar el PDF'));
+      setError(await mensajeDeErrorPdf(err));
     } finally {
       setExportando(false);
     }
@@ -371,6 +388,8 @@ export default function CatalogListPage() {
     const estadoEditable = [ESTADOS_REVISION.PENDIENTE, ESTADOS_REVISION.RECHAZADO].includes(item.estadoRevision);
     return esAutor && estadoEditable;
   }
+
+  const pastillas = resumenDeFiltros(filtros, { nombreDeCategoria: etiquetaDe, esUsuarioAuxiliar: user?.rol === ROLES.USER });
 
   const filas = agruparRegistros(registros);
   const borradoresEnPagina = filas.filter((f) => f.copias.length === 1 && !f.copias[0].enviado).map((f) => f.copias[0]);
@@ -407,11 +426,15 @@ export default function CatalogListPage() {
       header: 'ID',
       render: (row) =>
         row.copias.length > 1 ? (
-          // El primer ejemplar no es "copia de si mismo" - se muestran las copias
-          // adicionales (total menos el original), aunque los N registros existen igual.
-          <Badge tone="primary" icon={Layers}>
-            {row.copias.length - 1} {row.copias.length === 2 ? 'copia' : 'copias'}
-          </Badge>
+          // El primer ejemplar (el que se ingreso primero) no es "copia de si mismo": se muestra su
+          // ID y, al lado, cuantas copias adicionales tiene (total menos el original), aunque los N
+          // registros existen igual. El ID de cada copia sale al desplegar la fila.
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="font-medium text-slate-700">{row.idInventario ?? 'N/A'}</span>
+            <Badge tone="primary" icon={Layers}>
+              {row.copias.length - 1} {row.copias.length === 2 ? 'copia' : 'copias'}
+            </Badge>
+          </span>
         ) : (
           row.idInventario ?? 'N/A'
         ),
@@ -547,7 +570,7 @@ export default function CatalogListPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-primary-dark">Catalogo</h1>
         <div className="flex gap-2">
           <Link to="/catalogo/importar">
@@ -555,101 +578,77 @@ export default function CatalogListPage() {
               Importar Excel
             </Button>
           </Link>
-          <Button variant="secondary" icon={FileDown} onClick={handleExportar} disabled={exportando}>
-            {exportando ? 'Generando...' : 'Exportar PDF'}
-          </Button>
           <Link to="/catalogo/nuevo">
             <Button icon={Plus}>Registrar material</Button>
           </Link>
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          type="text"
-          value={buscarInput}
-          onChange={(e) => setBuscarInput(e.target.value)}
-          placeholder="Buscar por titulo, autor o ID..."
-          className="w-full rounded-md border border-border bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-        />
-      </div>
-
-      <div className="flex gap-3">
-        <Select
-          value={categoria}
-          onChange={(e) => {
-            setPage(1);
-            setCategoria(e.target.value);
-          }}
-          className="max-w-xs"
-        >
-          <option value="">Todas las categorias</option>
-          {categorias.map((cat) => (
-            <option key={cat.clave} value={cat.clave}>
-              {cat.nombre}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={estadoRevision}
-          onChange={(e) => {
-            setPage(1);
-            setEstadoRevision(e.target.value);
-          }}
-          className="max-w-xs"
-        >
-          <option value="">Todos los estados</option>
-          {Object.values(ESTADOS_REVISION).map((estado) => (
-            <option key={estado} value={estado}>
-              {ESTADO_REVISION_LABELS[estado]}
-            </option>
-          ))}
-          <option value="DE_BAJA">De baja</option>
-        </Select>
-        <Select
-          value={anioRegistro}
-          onChange={(e) => {
-            setPage(1);
-            setAnioRegistro(e.target.value);
-          }}
-          className="max-w-xs"
-        >
-          <option value="">Todos los años de registro</option>
-          {aniosRegistro.map((anio) => (
-            <option key={anio} value={anio}>
-              {anio}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={sort}
-          onChange={(e) => {
-            setPage(1);
-            setSort(e.target.value);
-          }}
-          className="max-w-xs"
-        >
-          {OPCIONES_ORDEN_CATALOGO.map((opcion) => (
-            <option key={opcion.value} value={opcion.value}>
-              Ordenar por: {opcion.label}
-            </option>
-          ))}
-        </Select>
-        {user?.rol === ROLES.USER ? (
-          <label className="flex items-center gap-2 text-sm text-slate-600">
+      {/* Busqueda, filtros y PDF juntos: el PDF sale con exactamente lo que se ve filtrado. */}
+      <div className="rounded-xl border border-border bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 p-3">
+          <div className="relative min-w-[14rem] flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
-              type="checkbox"
-              checked={soloMios}
-              onChange={(e) => {
-                setPage(1);
-                setSoloMios(e.target.checked);
-              }}
-              className="rounded border-border text-primary focus:ring-primary/30"
+              type="text"
+              value={buscarInput}
+              onChange={(e) => setBuscarInput(e.target.value)}
+              placeholder={placeholderBusqueda(filtros)}
+              className="h-10 w-full rounded-lg border border-border bg-slate-50 pl-10 pr-3 text-sm outline-none transition-colors focus:border-primary focus:bg-white focus:ring-2 focus:ring-primary/20"
             />
-            Solo mis registros
-          </label>
-        ) : null}
+          </div>
+          <FiltrosCatalogo
+            filtros={filtros}
+            onCambiar={cambiarFiltros}
+            onLimpiar={limpiarFiltros}
+            categorias={categorias}
+            aniosRegistro={aniosRegistro}
+            mostrarSoloMios={user?.rol === ROLES.USER}
+            cantidadActiva={pastillas.length}
+            total={total}
+            cargando={loading}
+          />
+          <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+          <Button variant="secondary" icon={FileDown} className="h-10" onClick={handleExportar} disabled={exportando}>
+            {exportando ? 'Generando...' : 'Exportar PDF'}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-b-xl border-t border-border bg-slate-50/70 px-4 py-2.5">
+          {pastillas.length === 0 ? (
+            <span className="text-xs text-slate-500">Sin filtros: se muestra todo el catalogo.</span>
+          ) : (
+            <>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filtros</span>
+              {pastillas.map((pastilla) => (
+                <span
+                  key={pastilla.id}
+                  className="inline-flex max-w-[18rem] items-center gap-1.5 rounded-full border border-primary/30 bg-white py-1 pl-2.5 pr-1 text-xs text-primary-dark"
+                >
+                  <span className="truncate">
+                    {pastilla.grupo ? <span className="text-slate-500">{pastilla.grupo}: </span> : null}
+                    <span className="font-medium">{pastilla.texto}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => cambiarFiltros(pastilla.quitar)}
+                    aria-label={`Quitar filtro ${pastilla.texto}`}
+                    className="rounded-full p-0.5 text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={limpiarFiltros} className="text-xs font-medium text-primary hover:underline">
+                Limpiar
+              </button>
+            </>
+          )}
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
+            <FileDown size={13} className="shrink-0" />
+            El PDF usa estos mismos filtros{total !== null ? ` · ${total} ${total === 1 ? 'material' : 'materiales'}` : ''}
+          </span>
+        </div>
       </div>
 
       <AlertBanner>{error}</AlertBanner>

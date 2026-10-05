@@ -3,7 +3,8 @@ const Category = require('./category_model');
 const User = require('../users/user_model');
 const { registrarAuditoria } = require('../audit/audit_service');
 const { ROLES, ESTADOS_REVISION, ACCIONES_AUDITORIA } = require('../../utils/constants');
-const { escapeRegExp } = require('../../helpers/regex');
+const { construirFiltroBusqueda } = require('../../helpers/catalogSearch');
+const { aplicarFiltrosDeCategoriaYEstado } = require('../../helpers/catalogFilters');
 const { previsualizarWorkbook } = require('../../helpers/excelImport');
 const { resolverOrden } = require('../../helpers/catalogSort');
 const { agruparPorCopias } = require('../../helpers/catalogGroup');
@@ -118,26 +119,18 @@ function filtroVisibilidadBorradores(userId) {
 
 async function listItems(req, res, next) {
   try {
-    const { estadoRevision, categoria, registradoPor, anioRegistro, buscar, sort, page = 1, limit = 20 } = req.query;
+    const { estadoRevision, categoria, registradoPor, anioRegistro, buscar, buscarEn, sort, page = 1, limit = 20 } = req.query;
 
-    const filtro = { eliminado: false };
-    if (estadoRevision === 'DE_BAJA') {
-      filtro.deBaja = true;
-    } else if (estadoRevision) {
-      filtro.estadoRevision = estadoRevision;
-    }
-    if (categoria) filtro.categoria = categoria;
+    // categoria y estadoRevision aceptan varios valores separados por coma (casillas del panel de filtros).
+    const filtro = aplicarFiltrosDeCategoriaYEstado({ eliminado: false }, { categoria, estadoRevision });
     if (registradoPor) filtro.registradoPor = registradoPor;
     const rangoAnioRegistro = rangoDeAnio(anioRegistro);
     if (rangoAnioRegistro) filtro.createdAt = rangoAnioRegistro;
 
     const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
-    if (buscar && buscar.trim()) {
-      const textoBuscado = buscar.trim();
-      const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
-      // El ID tambien se busca (ej. "20F" encuentra el ejemplar 20F y sus copias 20F-C1, 20F-C2).
-      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { idInventario: patron }] });
-    }
+    // "buscarEn" decide en que campos busca el texto (ID, ID exacto, titulo y/o autor; por defecto todos).
+    const clausulaBusqueda = construirFiltroBusqueda(buscar, buscarEn);
+    if (clausulaBusqueda) clausulas.push(clausulaBusqueda);
     const filtroFinal = { $and: clausulas };
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);

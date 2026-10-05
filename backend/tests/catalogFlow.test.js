@@ -830,4 +830,17 @@ describe('Paginacion agrupada por copias (GET /api/catalog)', () => {
     const titulosEnPagina1 = res.body.data.registros.map((r) => r.titulo);
     expect(titulosEnPagina1.filter((t) => t === 'Libro Viejo En Stock')).toHaveLength(4);
   });
+
+  test('por defecto (orden de ingreso) una copia ingresada al final se va con su original, cada una con su ID', async () => {
+    await crearYEnviar(userToken, { ...libroValido('20F'), titulo: 'Libro Con Copia', estadoFisico: 'Buen estado' });
+    await crearYEnviar(userToken, { ...libroValido('21F'), titulo: 'Libro Aparte Uno' });
+    await crearYEnviar(userToken, { ...libroValido('22F'), titulo: 'Libro Aparte Dos' });
+    await crearYEnviar(userToken, { ...libroValido('20F-C1'), titulo: 'Libro Con Copia', estadoFisico: 'Pasta rota' });
+
+    const res = await api(app).get('/api/catalog').set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(3); // el libro con su copia cuenta como un solo material
+    expect(res.body.data.registros.map((r) => r.idInventario)).toEqual(['20F', '20F-C1', '21F', '22F']);
+  });
 });

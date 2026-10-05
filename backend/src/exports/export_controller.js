@@ -6,8 +6,9 @@ const { registrarAuditoria } = require('../audit/audit_service');
 const { ACCIONES_AUDITORIA, tieneDanoFisico } = require('../../utils/constants');
 const { drawTable, DANGER_TEXT, GRIS_BAJA_FONDO, ROJO_RECHAZO_FONDO } = require('../../helpers/pdfTable');
 const { resolverOrden } = require('../../helpers/catalogSort');
-const { escapeRegExp } = require('../../helpers/regex');
-const { claveDeGrupo, normalizarTexto } = require('../../helpers/catalogGroup');
+const { construirFiltroBusqueda, etiquetaModoBusqueda } = require('../../helpers/catalogSearch');
+const { listaDeValores, aplicarFiltrosDeCategoriaYEstado } = require('../../helpers/catalogFilters');
+const { claveDeGrupo, normalizarTexto, agruparPorCopias } = require('../../helpers/catalogGroup');
 const { fail } = require('../../utils/httpResponse');
 
 const ESTADO_LABELS = {
@@ -614,15 +615,10 @@ function categoriasOrdenadasParaReporte(claves) {
 
 async function exportCatalogPdf(req, res, next) {
   try {
-    const { estadoRevision, categoria, buscar, registradoPor, anioRegistro, sort } = req.query;
+    const { estadoRevision, categoria, buscar, buscarEn, registradoPor, anioRegistro, sort } = req.query;
 
-    const filtro = { eliminado: false };
-    if (estadoRevision === 'DE_BAJA') {
-      filtro.deBaja = true;
-    } else if (estadoRevision) {
-      filtro.estadoRevision = estadoRevision;
-    }
-    if (categoria) filtro.categoria = categoria;
+    // categoria y estadoRevision aceptan varios valores separados por coma (casillas del panel de filtros).
+    const filtro = aplicarFiltrosDeCategoriaYEstado({ eliminado: false }, { categoria, estadoRevision });
     if (registradoPor) filtro.registradoPor = registradoPor;
     const rangoAnioRegistro = rangoDeAnio(anioRegistro);
     if (rangoAnioRegistro) filtro.createdAt = rangoAnioRegistro;
@@ -631,17 +627,18 @@ async function exportCatalogPdf(req, res, next) {
     // respetar la misma regla de visibilidad de borradores que la lista: un borrador sin
     // enviar solo lo ve quien lo creo, nunca deberia colarse en el PDF de alguien mas.
     const clausulas = [filtro, filtroVisibilidadBorradores(req.user.userId)];
-    if (buscar && buscar.trim()) {
-      const textoBuscado = buscar.trim();
-      const patron = new RegExp(escapeRegExp(textoBuscado), 'i');
-      clausulas.push({ $or: [{ titulo: patron }, { autor: patron }, { idInventario: patron }] });
-    }
+    const clausulaBusqueda = construirFiltroBusqueda(buscar, buscarEn);
+    if (clausulaBusqueda) clausulas.push(clausulaBusqueda);
     const filtroFinal = { $and: clausulas };
 
     const { sort: sortSpec, collation } = resolverOrden(sort);
     const consulta = Catalog.find(filtroFinal).sort({ categoria: 1, ...sortSpec });
     if (collation) consulta.collation(collation);
-    const registros = await consulta;
+    // Igual que en la lista del catalogo: una copia ingresada despues de otros materiales no se queda
+    // al final, sale justo despues de su original (cada una con su propio ID). Los grupos conservan
+    // el orden en que aparecio su primer registro, asi que el resto del orden (de ingreso por
+    // defecto) no cambia, y la categoria va primero en el orden, por lo que un grupo nunca la cruza.
+    const registros = agruparPorCopias(await consulta).flat();
 
     if (registros.length === 0) {
       return fail(res, 'No hay registros que coincidan con los filtros indicados', 404);
@@ -671,10 +668,15 @@ async function exportCatalogPdf(req, res, next) {
     });
     doc.pipe(res);
 
-    const textoFiltros = `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoria || 'todas'}, estado=${
-      estadoRevision === 'DE_BAJA' ? 'De baja' : estadoRevision ? ESTADO_LABELS[estadoRevision] : 'todos'
-    }${rangoAnioRegistro ? `, año de registro=${anioRegistro}` : ''}${
-      buscar && buscar.trim() ? `, busqueda="${buscar.trim()}"` : ''
+    const categoriasTexto = listaDeValores(categoria).join(', ') || 'todas';
+    const estadosTexto =
+      listaDeValores(estadoRevision)
+        .map((estado) => (estado === 'DE_BAJA' ? 'De baja' : ESTADO_LABELS[estado] || estado))
+        .join(', ') || 'todos';
+    const textoFiltros = `Generado: ${new Date().toLocaleString('es-GT')}  |  Filtros: categoria=${categoriasTexto}, estado=${estadosTexto}${
+      rangoAnioRegistro ? `, año de registro=${anioRegistro}` : ''
+    }${
+      buscar && buscar.trim() ? `, busqueda="${buscar.trim()}" en ${etiquetaModoBusqueda(buscarEn)}` : ''
     }  |  Total: ${registros.length}`;
 
     // Titulo del reporte, filtros y leyenda de colores: van en la primera hoja de CADA categoria

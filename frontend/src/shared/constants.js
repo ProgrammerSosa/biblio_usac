@@ -73,6 +73,23 @@ export const ACCION_TONOS = {
 // al importar un Excel, el mismo orden de sus filas.
 export const ORDEN_POR_DEFECTO = 'fecha_asc';
 
+// Campos en los que busca el cuadro de busqueda del catalogo (mismos valores que resuelve el
+// backend en helpers/catalogSearch.js). Se marcan en el panel de filtros: se puede buscar en uno,
+// en dos o en los tres a la vez. Con "ID" marcado, escribir un sello o tipo (ej. SDE) trae todos
+// los que lo llevan en su ID.
+export const CAMPOS_BUSQUEDA = [
+  { clave: 'id', label: 'ID', ayuda: 'Ej. 20F, SDE' },
+  { clave: 'titulo', label: 'Titulo', ayuda: 'Nombre del material' },
+  { clave: 'autor', label: 'Autor', ayuda: 'Quien lo escribio' },
+];
+
+// Estados que se pueden marcar en el filtro. "De baja" no es un estado de revision: es la marca
+// de un registro dado de baja, pero para quien filtra se elige igual que los demas.
+export const OPCIONES_ESTADO_FILTRO = [
+  ...Object.values(ESTADOS_REVISION).map((estado) => ({ clave: estado, label: ESTADO_REVISION_LABELS[estado] })),
+  { clave: 'DE_BAJA', label: 'De baja' },
+];
+
 export const OPCIONES_ORDEN_CATALOGO = [
   { value: 'fecha_asc', label: 'Orden de ingreso (como el Excel)' },
   { value: 'fecha_desc', label: 'Mas recientes primero' },
