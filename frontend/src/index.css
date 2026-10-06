@@ -18,8 +18,74 @@
   transform-origin: top right;
 }
 
+/* Indicador de carga con tematica de biblioteca (CargandoBiblioteca.jsx). */
+.kiosco-pagina {
+  transform-box: view-box;
+  transform-origin: 100px 67px;
+  animation: kiosco-pagina-voltea 2.4s ease-in-out infinite;
+}
+
+@keyframes kiosco-pagina-voltea {
+  0% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  40% {
+    transform: scaleX(0.02);
+    opacity: 1;
+  }
+  75% {
+    transform: scaleX(-1);
+    opacity: 1;
+  }
+  90% {
+    transform: scaleX(-1);
+    opacity: 0;
+  }
+  91% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.kiosco-lomo {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: kiosco-lomo-sube 1.6s ease-in-out infinite;
+}
+
+@keyframes kiosco-lomo-sube {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-7px);
+  }
+}
+
+.kiosco-barra {
+  animation: kiosco-barra-corre 1.4s ease-in-out infinite;
+}
+
+@keyframes kiosco-barra-corre {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .panel-flotante {
+  .panel-flotante,
+  .kiosco-pagina,
+  .kiosco-lomo,
+  .kiosco-barra {
     animation: none;
   }
 }

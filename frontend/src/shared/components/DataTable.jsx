@@ -1,11 +1,13 @@
 import { Fragment, useState } from 'react';
-import { Loader2, Inbox, ChevronRight, ChevronDown } from 'lucide-react';
+import { Inbox, ChevronRight, ChevronDown } from 'lucide-react';
+import CargandoBiblioteca from './CargandoBiblioteca';
 
 export default function DataTable({
   columns,
   rows,
   rowKey,
   loading,
+  mensajeCargando,
   emptyMessage = 'No hay registros para mostrar',
   renderExpanded,
   rowClassName,
@@ -24,6 +26,16 @@ export default function DataTable({
 
   const totalColumnas = columns.length + (expandable ? 1 : 0);
 
+  // Mientras carga se muestra el indicador solo, en su propio recuadro: dentro de la tabla (que puede
+  // ser mas ancha que la pantalla) quedaria descentrado.
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-white px-4 py-10">
+        <CargandoBiblioteca mensaje={mensajeCargando} />
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-white">
       <table className="w-full min-w-max text-left text-sm">
@@ -31,23 +43,14 @@ export default function DataTable({
           <tr>
             {expandable ? <th className="w-8 px-2 py-3" /> : null}
             {columns.map((col) => (
-              <th key={col.key} className="px-4 py-3 font-semibold">
+              <th key={col.key} className="px-3.5 py-3 font-semibold">
                 {col.header}
               </th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {loading ? (
-            <tr>
-              <td colSpan={totalColumnas} className="px-4 py-10 text-center text-slate-400">
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="animate-spin" size={20} />
-                  Cargando...
-                </div>
-              </td>
-            </tr>
-          ) : rows.length === 0 ? (
+          {rows.length === 0 ? (
             <tr>
               <td colSpan={totalColumnas} className="px-4 py-10 text-center text-slate-400">
                 <div className="flex flex-col items-center gap-2">
@@ -74,7 +77,7 @@ export default function DataTable({
                       </td>
                     ) : null}
                     {columns.map((col) => (
-                      <td key={col.key} className="px-4 py-3 text-slate-700">
+                      <td key={col.key} className="px-3.5 py-3 text-slate-700">
                         {col.render ? col.render(row) : row[col.key]}
                       </td>
                     ))}

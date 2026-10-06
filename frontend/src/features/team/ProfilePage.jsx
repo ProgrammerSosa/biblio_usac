@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Trophy, CalendarDays, BookCopy, Loader2 } from 'lucide-react';
+import { ArrowLeft, Trophy, CalendarDays, BookCopy } from 'lucide-react';
 import { teamApi } from './teamApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { ROL_LABELS, ESTADO_REVISION_LABELS } from '../../shared/constants';
 import Badge from '../../shared/components/Badge';
 import AlertBanner from '../../shared/components/AlertBanner';
+import CargandoBiblioteca from '../../shared/components/CargandoBiblioteca';
 
 function StatTile({ icon: Icon, label, value, detalle }) {
   return (
@@ -56,10 +57,7 @@ export default function ProfilePage() {
       <AlertBanner>{error}</AlertBanner>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-slate-400">
-          <Loader2 className="animate-spin" size={18} />
-          Cargando perfil...
-        </div>
+        <CargandoBiblioteca mensaje="Cargando el perfil" detalle="Un momento, estamos buscando su ficha..." />
       ) : perfil ? (
         <div className="flex flex-col gap-5">
           <div className="rounded-lg border border-border bg-white p-6">

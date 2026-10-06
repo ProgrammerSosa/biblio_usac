@@ -14,6 +14,8 @@ import {
   HardDrive,
   CalendarClock,
   X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { ROL_LABELS } from '../constants';
@@ -72,17 +74,67 @@ function useRecordatorioRespaldo(rol) {
   return { visible, descartar };
 }
 
+// Menu lateral desplegable: abierto (con los nombres) o recogido (solo los iconos). Se recuerda la
+// ultima eleccion en este navegador; si nunca se eligio, arranca recogido en pantallas angostas.
+const CLAVE_MENU_RECOGIDO = 'menu-lateral-recogido';
+
+function useMenuRecogido() {
+  const [recogido, setRecogido] = useState(() => {
+    try {
+      const guardado = localStorage.getItem(CLAVE_MENU_RECOGIDO);
+      if (guardado !== null) return guardado === '1';
+    } catch {
+      // Sin localStorage (modo privado, etc.) simplemente no se recuerda la eleccion.
+    }
+    return window.innerWidth < 768;
+  });
+
+  function alternar() {
+    setRecogido((actual) => {
+      const siguiente = !actual;
+      try {
+        localStorage.setItem(CLAVE_MENU_RECOGIDO, siguiente ? '1' : '0');
+      } catch {
+        // No pasa nada si no se pudo guardar.
+      }
+      return siguiente;
+    });
+  }
+
+  return { recogido, alternar };
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const recordatorioRespaldo = useRecordatorioRespaldo(user?.rol);
+  const { recogido, alternar } = useMenuRecogido();
+
+  // Recogido, cada opcion es solo su icono (el nombre queda como tooltip y para lectores de pantalla).
+  const claseItem = `flex items-center rounded-md py-2.5 text-sm font-medium transition-colors ${
+    recogido ? 'justify-center px-0' : 'gap-3 px-3'
+  }`;
 
   return (
     <CategoriesProvider>
       <div className="flex min-h-screen">
-        <aside className="flex w-64 shrink-0 flex-col bg-primary-dark text-white">
-          <div className="flex items-center gap-2 px-5 py-5 text-sm font-semibold">
-            <Landmark size={22} />
-            <span>Biblioteca USAC</span>
+        <aside
+          className={`flex shrink-0 flex-col bg-primary-dark text-white transition-[width] duration-200 ${recogido ? 'w-[4.5rem]' : 'w-64'}`}
+        >
+          <div className={`flex items-center py-4 ${recogido ? 'flex-col gap-3 px-2' : 'justify-between gap-2 px-4'}`}>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Landmark size={22} className="shrink-0" />
+              {recogido ? null : <span>Biblioteca USAC</span>}
+            </div>
+            <button
+              type="button"
+              onClick={alternar}
+              aria-label={recogido ? 'Desplegar el menu' : 'Recoger el menu'}
+              aria-expanded={!recogido}
+              title={recogido ? 'Desplegar el menu' : 'Recoger el menu'}
+              className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              {recogido ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
           </div>
           <nav className="flex flex-1 flex-col gap-1 px-3">
             {NAV_ITEMS.filter((item) => item.roles.includes(user?.rol)).map((item) =>
@@ -92,43 +144,46 @@ export default function Layout() {
                   href={item.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+                  title={recogido ? item.label : undefined}
+                  className={`${claseItem} text-slate-300 hover:bg-white/5 hover:text-white`}
                 >
-                  <item.icon size={18} />
-                  <span className="flex-1">{item.label}</span>
-                  <ExternalLink size={14} className="shrink-0 opacity-60" />
+                  <item.icon size={18} className="shrink-0" />
+                  <span className={recogido ? 'sr-only' : 'flex-1'}>{item.label}</span>
+                  {recogido ? null : <ExternalLink size={14} className="shrink-0 opacity-60" />}
                 </a>
               ) : (
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  title={recogido ? item.label : undefined}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                      isActive ? 'bg-white/10 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                    }`
+                    `${claseItem} ${isActive ? 'bg-white/10 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`
                   }
                 >
-                  <item.icon size={18} />
-                  {item.label}
+                  <item.icon size={18} className="shrink-0" />
+                  <span className={recogido ? 'sr-only' : undefined}>{item.label}</span>
                 </NavLink>
               )
             )}
           </nav>
           <div className="border-t border-white/10 px-3 py-4">
-            <div className="mb-2 px-3">
-              <p className="text-sm font-medium">{user?.nombre}</p>
-              <p className="text-xs text-slate-400">{ROL_LABELS[user?.rol] || user?.rol}</p>
-            </div>
+            {recogido ? null : (
+              <div className="mb-2 px-3">
+                <p className="text-sm font-medium">{user?.nombre}</p>
+                <p className="text-xs text-slate-400">{ROL_LABELS[user?.rol] || user?.rol}</p>
+              </div>
+            )}
             <button
               onClick={logout}
-              className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-slate-300 hover:bg-white/5 hover:text-white"
+              title={recogido ? `Cerrar sesion (${user?.nombre})` : undefined}
+              className={`${claseItem} w-full text-slate-300 hover:bg-white/5 hover:text-white`}
             >
-              <LogOut size={18} />
-              Cerrar sesion
+              <LogOut size={18} className="shrink-0" />
+              <span className={recogido ? 'sr-only' : undefined}>Cerrar sesion</span>
             </button>
           </div>
         </aside>
-        <main className="flex-1 bg-surface p-6">
+        <main className="min-w-0 flex-1 bg-surface p-6">
           {recordatorioRespaldo.visible ? (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
               <span className="flex items-center gap-2">

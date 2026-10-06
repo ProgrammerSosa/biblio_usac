@@ -31,7 +31,7 @@ function RegistradoPor({ item }) {
   if (item.origenImportacion) {
     const nombre = item.registradoPor?.nombre || 'N/A';
     return (
-      <span className="flex max-w-[6rem] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
+      <span className="flex max-w-[clamp(5.5rem,6vw,10rem)] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
         <span className="inline-flex items-center gap-1 text-slate-600">
           <FileSpreadsheet size={13} className="shrink-0 text-primary" />
           <span className="truncate">{item.origenImportacion}</span>
@@ -41,7 +41,7 @@ function RegistradoPor({ item }) {
     );
   }
   return (
-    <span className="block max-w-[6rem] truncate" title={item.registradoPor?.nombre}>
+    <span className="block max-w-[clamp(5.5rem,6vw,10rem)] truncate" title={item.registradoPor?.nombre}>
       {item.registradoPor?.nombre || 'N/A'}
     </span>
   );
@@ -445,7 +445,7 @@ export default function CatalogListPage() {
       render: (row) => {
         const etiqueta = etiquetaDe(row.categoria);
         return (
-          <span className="block max-w-[6rem] truncate" title={etiqueta}>
+          <span className="block max-w-[clamp(5.5rem,6vw,10rem)] truncate" title={etiqueta}>
             {etiqueta}
           </span>
         );
@@ -455,7 +455,7 @@ export default function CatalogListPage() {
       key: 'titulo',
       header: 'Titulo',
       render: (row) => (
-        <span className="block max-w-[9rem] truncate" title={row.titulo}>
+        <span className="block max-w-[clamp(9rem,13vw,22rem)] truncate" title={row.titulo}>
           {row.titulo}
         </span>
       ),
@@ -464,7 +464,7 @@ export default function CatalogListPage() {
       key: 'autor',
       header: 'Autor',
       render: (row) => (
-        <span className="block max-w-[6rem] truncate" title={row.autor}>
+        <span className="block max-w-[clamp(6rem,8vw,14rem)] truncate" title={row.autor}>
           {row.autor}
         </span>
       ),
@@ -483,7 +483,7 @@ export default function CatalogListPage() {
         }
         const texto = row.copias[0].estadoFisico || 'N/A';
         return (
-          <span className="block max-w-[8rem] truncate text-slate-500" title={texto}>
+          <span className="block max-w-[clamp(7rem,8vw,13rem)] truncate text-slate-500" title={texto}>
             {texto}
           </span>
         );
@@ -675,6 +675,7 @@ export default function CatalogListPage() {
         rows={filas}
         rowKey="_id"
         loading={loading}
+        mensajeCargando="Buscando en el catalogo"
         emptyMessage="No hay materiales registrados"
         renderExpanded={renderExpanded}
       />

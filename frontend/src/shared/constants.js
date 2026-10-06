@@ -35,6 +35,8 @@ export const ACCIONES_AUDITORIA = [
   'DESACTIVAR_USUARIO',
   'ACTIVAR_CATEGORIA',
   'DESACTIVAR_CATEGORIA',
+  'DAR_DE_BAJA',
+  'RESTAURAR_RESPALDO',
 ];
 
 export const ACCION_LABELS = {
@@ -50,6 +52,8 @@ export const ACCION_LABELS = {
   DESACTIVAR_USUARIO: 'Desactivo un usuario',
   ACTIVAR_CATEGORIA: 'Activo una categoria',
   DESACTIVAR_CATEGORIA: 'Desactivo una categoria',
+  DAR_DE_BAJA: 'Dio de baja',
+  RESTAURAR_RESPALDO: 'Restauro un respaldo',
 };
 
 export const ACCION_TONOS = {
@@ -65,6 +69,8 @@ export const ACCION_TONOS = {
   DESACTIVAR_USUARIO: 'danger',
   ACTIVAR_CATEGORIA: 'success',
   DESACTIVAR_CATEGORIA: 'danger',
+  DAR_DE_BAJA: 'neutral',
+  RESTAURAR_RESPALDO: 'warning',
 };
 
 // Mismos 8 valores que resuelve el backend (helpers/catalogSort.js) - un valor

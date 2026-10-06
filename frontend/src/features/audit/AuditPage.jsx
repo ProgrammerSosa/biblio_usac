@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { auditApi } from './auditApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
+import { useCategories } from '../../shared/hooks/useCategories';
 import { ACCIONES_AUDITORIA, ACCION_LABELS, ACCION_TONOS, ROL_LABELS, ROLES } from '../../shared/constants';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
@@ -9,6 +10,7 @@ import Tabs from '../../shared/components/Tabs';
 import Pagination from '../../shared/components/Pagination';
 import AlertBanner from '../../shared/components/AlertBanner';
 import { Select } from '../../shared/components/FormField';
+import { resumenDetalles } from './detallesAuditoria';
 
 const TABS = [
   { value: 'reciente', label: 'Recientes (ultimos 30 dias)' },
@@ -19,15 +21,9 @@ function formatearFecha(fecha) {
   return new Date(fecha).toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function resumenDetalles(detalles) {
-  if (!detalles || Object.keys(detalles).length === 0) return '-';
-  return Object.entries(detalles)
-    .map(([clave, valor]) => `${clave}: ${valor}`)
-    .join(' · ');
-}
-
 export default function AuditPage() {
   const { user } = useAuth();
+  const { etiquetaDe } = useCategories();
   const esAuxiliar = user?.rol === ROLES.USER;
   const [activeTab, setActiveTab] = useState('reciente');
   const [registros, setRegistros] = useState([]);
@@ -80,7 +76,15 @@ export default function AuditPage() {
       render: (row) => <Badge tone={ACCION_TONOS[row.accion] || 'neutral'}>{ACCION_LABELS[row.accion] || row.accion}</Badge>,
     },
     { key: 'entidad', header: 'Entidad' },
-    { key: 'detalles', header: 'Detalles', render: (row) => <span className="text-xs text-slate-500">{resumenDetalles(row.detalles)}</span> },
+    {
+      key: 'detalles',
+      header: 'Detalles',
+      render: (row) => (
+        <span className="block min-w-[14rem] max-w-md text-xs leading-relaxed text-slate-500">
+          {resumenDetalles(row.detalles, { nombreDeCategoria: etiquetaDe })}
+        </span>
+      ),
+    },
   ];
 
   return (

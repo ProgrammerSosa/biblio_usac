@@ -5,7 +5,7 @@ import { catalogApi } from '../catalog/catalogApi';
 import { getErrorMessage } from '../../shared/api/axiosClient';
 import { useAuth } from '../../shared/hooks/useAuth';
 import { useCategories } from '../../shared/hooks/useCategories';
-import { ESTADOS_REVISION, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
+import { ESTADOS_REVISION, ROLES, tieneDanoFisico, ORDEN_POR_DEFECTO } from '../../shared/constants';
 import { agruparRegistros } from '../../shared/utils/catalogGrouping';
 import DataTable from '../../shared/components/DataTable';
 import Badge from '../../shared/components/Badge';
@@ -14,7 +14,8 @@ import Button from '../../shared/components/Button';
 import Pagination from '../../shared/components/Pagination';
 import Modal from '../../shared/components/Modal';
 import AlertBanner from '../../shared/components/AlertBanner';
-import { Textarea, Select } from '../../shared/components/FormField';
+import { Textarea } from '../../shared/components/FormField';
+import SelectorOrden from '../../shared/components/SelectorOrden';
 import CatalogDetailFields from '../catalog/CatalogDetailFields';
 
 const TABS = [
@@ -26,7 +27,7 @@ function RegistradoPor({ item }) {
   if (item.origenImportacion) {
     const nombre = item.registradoPor?.nombre || 'N/A';
     return (
-      <span className="flex max-w-[6rem] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
+      <span className="flex max-w-[clamp(5.5rem,6vw,10rem)] flex-col" title={`Importado de ${item.origenImportacion} por ${nombre}`}>
         <span className="inline-flex items-center gap-1 text-slate-600">
           <FileSpreadsheet size={13} className="shrink-0 text-primary" />
           <span className="truncate">{item.origenImportacion}</span>
@@ -36,7 +37,7 @@ function RegistradoPor({ item }) {
     );
   }
   return (
-    <span className="block max-w-[6rem] truncate" title={item.registradoPor?.nombre}>
+    <span className="block max-w-[clamp(5.5rem,6vw,10rem)] truncate" title={item.registradoPor?.nombre}>
       {item.registradoPor?.nombre || 'N/A'}
     </span>
   );
@@ -298,7 +299,7 @@ export default function ApprovalsPage() {
       render: (row) => {
         const etiqueta = etiquetaDe(row.categoria);
         return (
-          <span className="block max-w-[6rem] truncate" title={etiqueta}>
+          <span className="block max-w-[clamp(5.5rem,6vw,10rem)] truncate" title={etiqueta}>
             {etiqueta}
           </span>
         );
@@ -308,7 +309,7 @@ export default function ApprovalsPage() {
       key: 'titulo',
       header: 'Titulo',
       render: (row) => (
-        <span className="block max-w-[9rem] truncate" title={row.titulo}>
+        <span className="block max-w-[clamp(9rem,13vw,22rem)] truncate" title={row.titulo}>
           {row.titulo}
         </span>
       ),
@@ -317,7 +318,7 @@ export default function ApprovalsPage() {
       key: 'autor',
       header: 'Autor',
       render: (row) => (
-        <span className="block max-w-[6rem] truncate" title={row.autor}>
+        <span className="block max-w-[clamp(6rem,8vw,14rem)] truncate" title={row.autor}>
           {row.autor}
         </span>
       ),
@@ -333,7 +334,7 @@ export default function ApprovalsPage() {
           }
           const texto = row.copias[0].estadoFisico || 'N/A';
           return (
-            <span className="block max-w-[8rem] truncate text-slate-500" title={texto}>
+            <span className="block max-w-[clamp(7rem,8vw,13rem)] truncate text-slate-500" title={texto}>
               {texto}
             </span>
           );
@@ -341,7 +342,7 @@ export default function ApprovalsPage() {
         return tieneDanoFisico(row.estadoFisico) ? (
           <Badge tone="danger">{row.estadoFisico}</Badge>
         ) : (
-          <span className="block max-w-[8rem] truncate" title={row.estadoFisico}>
+          <span className="block max-w-[clamp(7rem,8vw,13rem)] truncate" title={row.estadoFisico}>
             {row.estadoFisico || 'N/A'}
           </span>
         );
@@ -394,7 +395,7 @@ export default function ApprovalsPage() {
     <div className="flex flex-col gap-4">
       <h1 className="text-xl font-semibold text-primary-dark">Aprobaciones</h1>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <Tabs
           tabs={TABS}
           active={activeTab}
@@ -403,20 +404,13 @@ export default function ApprovalsPage() {
             setPage(1);
           }}
         />
-        <Select
+        <SelectorOrden
           value={sort}
-          onChange={(e) => {
+          onChange={(valor) => {
             setPage(1);
-            setSort(e.target.value);
+            setSort(valor);
           }}
-          className="max-w-xs"
-        >
-          {OPCIONES_ORDEN_CATALOGO.map((opcion) => (
-            <option key={opcion.value} value={opcion.value}>
-              Ordenar por: {opcion.label}
-            </option>
-          ))}
-        </Select>
+        />
       </div>
 
       <AlertBanner>{error}</AlertBanner>

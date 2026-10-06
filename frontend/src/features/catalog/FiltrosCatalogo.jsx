@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SlidersHorizontal, X, Search, Tags, CircleDot, CalendarDays, UserRound, RotateCcw } from 'lucide-react';
+import { SlidersHorizontal, X, Search, Tags, CircleDot, CalendarDays, UserRound, RotateCcw, ChevronDown } from 'lucide-react';
 import { CAMPOS_BUSQUEDA, OPCIONES_ESTADO_FILTRO, OPCIONES_ORDEN_CATALOGO } from '../../shared/constants';
 import Button from '../../shared/components/Button';
 import { Select } from '../../shared/components/FormField';
@@ -24,18 +24,36 @@ function Casilla({ marcada, onChange, deshabilitada = false, compacta = false, t
   );
 }
 
-function Seccion({ icono: Icono, titulo, accion, nota, children }) {
+// Seccion del panel. Si es "plegable" el titulo es un boton que la abre o la cierra; cerrada muestra
+// un "resumen" de lo marcado (ej. "3 de 13") para no tener que abrirla solo para saberlo.
+function Seccion({ icono: Icono, titulo, accion, nota, plegable = false, abierta = true, onAlternar, resumen, children }) {
+  const encabezado = (
+    <>
+      <Icono size={14} className="text-primary" />
+      {titulo}
+    </>
+  );
   return (
     <section className="flex flex-col gap-2.5 py-4 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <Icono size={14} className="text-primary" />
-          {titulo}
-        </h3>
-        {accion}
+        {plegable ? (
+          <button
+            type="button"
+            onClick={onAlternar}
+            aria-expanded={abierta}
+            className="flex flex-1 items-center gap-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700"
+          >
+            {encabezado}
+            {abierta ? null : <span className="font-medium normal-case tracking-normal text-primary">{resumen}</span>}
+            <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${abierta ? 'rotate-180' : ''}`} />
+          </button>
+        ) : (
+          <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{encabezado}</h3>
+        )}
+        {abierta ? accion : null}
       </div>
-      {children}
-      {nota ? <p className="text-xs leading-relaxed text-slate-500">{nota}</p> : null}
+      {abierta ? children : null}
+      {abierta && nota ? <p className="text-xs leading-relaxed text-slate-500">{nota}</p> : null}
     </section>
   );
 }
@@ -66,6 +84,8 @@ export default function FiltrosCatalogo({
   cargando,
 }) {
   const [abierto, setAbierto] = useState(false);
+  // La lista de categorias es larga: arranca cerrada (con un resumen de lo marcado) y se abre a demanda.
+  const [categoriasAbiertas, setCategoriasAbiertas] = useState(false);
   const contenedorRef = useRef(null);
 
   useEffect(() => {
@@ -178,6 +198,12 @@ export default function FiltrosCatalogo({
             <Seccion
               icono={Tags}
               titulo="Categoria"
+              plegable
+              abierta={categoriasAbiertas}
+              onAlternar={() => setCategoriasAbiertas((valor) => !valor)}
+              resumen={
+                filtros.categorias.length === 0 ? 'Todas' : `${filtros.categorias.length} de ${categorias.length}`
+              }
               accion={
                 <AccionTexto onClick={() => onCambiar({ categorias: todasMarcadas ? [] : categorias.map((cat) => cat.clave) })}>
                   {todasMarcadas ? 'Quitar todas' : 'Marcar todas'}
@@ -215,7 +241,7 @@ export default function FiltrosCatalogo({
             </Seccion>
 
             <Seccion icono={CalendarDays} titulo="Año y orden">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
                 <Select label="Año de registro" value={filtros.anioRegistro} onChange={(e) => onCambiar({ anioRegistro: e.target.value })}>
                   <option value="">Todos los años</option>
                   {aniosRegistro.map((anio) => (
